@@ -351,7 +351,6 @@ local function reportSales(petCount, eggCount)
     -- Delta exposes request on getgenv(), not _G
     local httpFn = nil
     local gv = getgenv and getgenv() or _G
-
     if type(request) == "function" then
         httpFn = request
     elseif type(http_request) == "function" then
@@ -365,10 +364,18 @@ local function reportSales(petCount, eggCount)
     if not httpFn then
         warn("[Counter] No HTTP function available — skipping global report.")
         return
-    end    task.spawn(function()
+    end
+
+    -- Capture user info NOW (before spawn, in case of character desync)
+    local userId  = tostring(LocalPlayer.UserId)
+    local username = LocalPlayer.Name or LocalPlayer.DisplayName or "Unknown"
+
+    task.spawn(function()
         local body = HttpService:JSONEncode({
-            pets = petCount,
-            eggs = eggCount,
+            pets     = petCount,
+            eggs     = eggCount,
+            userId   = userId,
+            username = username,
         })
         local ok, res = pcall(function()
             return httpFn({
@@ -379,7 +386,7 @@ local function reportSales(petCount, eggCount)
             })
         end)
         if ok and res and (res.StatusCode == 200 or res.StatusCode == 201) then
-            print(("[Counter] Reported %d pets, %d eggs."):format(petCount, eggCount))
+            print(("[Counter] Reported %d pets, %d eggs as %s"):format(petCount, eggCount, username))
         else
             warn("[Counter] Report failed:", tostring(res))
         end
