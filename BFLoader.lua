@@ -307,10 +307,14 @@ end
 -- Returns { Eggs = {...uids}, Assets = {...uids}, Details = {...} }
 local function buildPayload()
     local pets, eggs = {}, {}
-    local details = {}   -- {kind, uid, category, name, rarity, rarityNum}
+    local details = {}
+    local totalValue = 0
 
     local d = getSave()
-    if not d then return { Eggs = eggs, Assets = pets, Details = details } end
+    if not d then return { Eggs = eggs, Assets = pets, Details = details, TotalValue = 0 } end
+
+    -- VIP doubles sale price (per the game's own code)
+    local isVIP = LocalPlayer:GetAttribute("VIP") == true
 
     -- Pets
     if type(d.Inventory) == "table" then
@@ -321,6 +325,14 @@ local function buildPayload()
 
                 local entry = AssetDir[item.Category]
                 local rarity = entry.Rarity
+
+                -- Sale value
+                local priceOk, basePrice = TryCall(AssetItems.SalePrice, item)
+                local value = (priceOk and tonumber(basePrice)) or 0
+                if isVIP then value = value * 2 end
+                value = math.floor(value)
+                totalValue = totalValue + value
+
                 table.insert(details, {
                     kind      = "pet",
                     uid       = uid,
@@ -328,6 +340,7 @@ local function buildPayload()
                     name      = entry.DisplayName or item.Category,
                     rarity    = (rarity and rarity.DisplayName) or "Unknown",
                     rarityNum = (rarity and rarity.RarityNumber) or 0,
+                    value     = value,
                 })
             end
         end
@@ -343,6 +356,12 @@ local function buildPayload()
 
                     local entry = AssetDir[dec.AssetCategory]
                     local rarity = entry.Rarity
+
+                    local priceOk, basePrice = TryCall(EggRecords.SellPrice, dec)
+                    local value = (priceOk and tonumber(basePrice)) or 0
+                    value = math.floor(value)
+                    totalValue = totalValue + value
+
                     table.insert(details, {
                         kind      = "egg",
                         uid       = uid,
@@ -350,13 +369,14 @@ local function buildPayload()
                         name      = (entry.Egg and entry.Egg.DisplayName) or entry.DisplayName or dec.AssetCategory,
                         rarity    = (rarity and rarity.DisplayName) or "Unknown",
                         rarityNum = (rarity and rarity.RarityNumber) or 0,
+                        value     = value,
                     })
                 end
             end
         end
     end
 
-    return { Eggs = eggs, Assets = pets, Details = details }
+    return { Eggs = eggs, Assets = pets, Details = details, TotalValue = totalValue }
 end
 
 local function findSellPosition()
@@ -375,10 +395,9 @@ end
 ------------------------------------------------------------
 -- GLOBAL COUNTER REPORTING
 ------------------------------------------------------------
-local function reportSales(petCount, eggCount, details)
+local function reportSales(petCount, eggCount, details, totalValue)
     if petCount + eggCount <= 0 then return end
 
-    -- HTTP function discovery (Delta's quirks)
     local httpFn = nil
     local gv = getgenv and getgenv() or _G
     if type(request) == "function" then httpFn = request
@@ -395,7 +414,6 @@ local function reportSales(petCount, eggCount, details)
     local userId   = tostring(LocalPlayer.UserId)
     local username = LocalPlayer.Name or "Unknown"
 
-    -- Cap details at 200 items per report to keep payload small
     local trimmed = {}
     for i, d in ipairs(details or {}) do
         if i > 200 then break end
@@ -404,16 +422,18 @@ local function reportSales(petCount, eggCount, details)
             name      = d.name,
             rarity    = d.rarity,
             rarityNum = d.rarityNum,
+            value     = d.value,
         })
     end
 
     task.spawn(function()
         local body = HttpService:JSONEncode({
-            pets     = petCount,
-            eggs     = eggCount,
-            userId   = userId,
-            username = username,
-            items    = trimmed,
+            pets       = petCount,
+            eggs       = eggCount,
+            userId     = userId,
+            username   = username,
+            items      = trimmed,
+            totalValue = totalValue or 0,
         })
         local ok, res = pcall(function()
             return httpFn({
@@ -424,8 +444,8 @@ local function reportSales(petCount, eggCount, details)
             })
         end)
         if ok and res and (res.StatusCode == 200 or res.StatusCode == 201) then
-            print(("[Counter] Reported %d pets, %d eggs as %s (%d details)"):format(
-                petCount, eggCount, username, #trimmed))
+            print(("[Counter] Reported %d pets, %d eggs, $%d as %s (%d details)"):format(
+                petCount, eggCount, totalValue or 0, username, #trimmed))
         else
             warn("[Counter] Report failed:", tostring(res))
         end
@@ -471,7 +491,7 @@ local function teleportAndSell()
     end
 
     -- Report to global counter with full Details (pets, eggs, rarities)
-    reportSales(petCount, eggCount, payload.Details)
+    reportSales(petCount, eggCount, payload.Details, payload.TotalValue)
 end
 
 ------------------------------------------------------------
