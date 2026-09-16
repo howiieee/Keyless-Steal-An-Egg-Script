@@ -422,10 +422,9 @@ local function reportSales(petCount, eggCount, details, totalValue)
     local userId   = tostring(LocalPlayer.UserId)
     local username = LocalPlayer.Name or "Unknown"
 
-    -- Raised from 200 → 2000 so no items get dropped
+    -- No cap — every item goes through
     local trimmed = {}
-    for i, d in ipairs(details or {}) do
-        if i > 2000 then break end
+    for _, d in ipairs(details or {}) do
         table.insert(trimmed, {
             kind      = d.kind,
             name      = d.name,
