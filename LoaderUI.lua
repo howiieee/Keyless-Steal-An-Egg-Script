@@ -1,17 +1,3 @@
--- LoaderUI.lua
--- Reusable loading-screen + meme popup for the sell-counter loader.
--- Returns a class-like table: LoaderUI.new(playerGui, config) -> ui instance
---
--- Host it anywhere reachable by HttpGet (GitHub raw works best) and load with:
---   local LoaderUI = loadstring(game:HttpGet("https://.../LoaderUI.lua"))()
---
--- API:
---   ui:boot()                -- plays the standard boot animation
---   ui:setStatus(t, pct, d)  -- manual status update (optional)
---   ui:fadeOutAndCleanup()   -- fade out, destroy, restore CoreGui
---   ui:showMemePopup()       -- floating image + laugh sound
---   ui:restoreExtras()       -- restore CoreGui (auto-called on cleanup)
-
 local TweenService    = game:GetService("TweenService")
 local RunService      = game:GetService("RunService")
 local StarterGui      = game:GetService("StarterGui")
