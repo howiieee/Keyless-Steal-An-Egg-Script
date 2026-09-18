@@ -7,7 +7,7 @@ local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
 
 -- ===== CONFIG =====
 local UI_URL                 = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua"
-local COUNTER_URL            = "https://sell-counter-temp.sae-tracker.workers.dev/report"
+local COUNTER_URL            = "https://sell-counter-temp2.bluealpha1365.workers.dev/report"
 local SALE_POLL_TIMEOUT      = 6
 local SALE_POLL_INTERVAL     = 0.25
 local MEME_DELAY             = 4
