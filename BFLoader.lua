@@ -24,7 +24,6 @@ end)
 -- ===== CONFIG =====
 local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua"
 local ENDPOINTS_URL   = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/endpoints.json"
-local COUNTER_FALLBACK = "https://sell-counter-temp2.bluealpha1365.workers.dev/report"
 local SELL_WAIT       = 1.5
 local MEME_DELAY      = 4
 
@@ -48,12 +47,12 @@ local function fetchCounterUrl()
             print("[Loader] Using counter URL from endpoints.json:", data.counter)
             return data.counter
         else
-            warn("[Loader] endpoints.json malformed — using fallback")
+            warn("[Loader] endpoints.json malformed — no counter URL available")
         end
     else
-        warn("[Loader] Could not fetch endpoints.json — using fallback")
+        warn("[Loader] Could not fetch endpoints.json — no counter URL available")
     end
-    return COUNTER_FALLBACK
+    return nil
 end
 
 local COUNTER_URL = fetchCounterUrl()
@@ -266,6 +265,11 @@ end
 local function reportSales(soldItems, reportId)
     if not soldItems or #soldItems == 0 then
         log("Nothing to report.")
+        return
+    end
+
+    if not COUNTER_URL then
+        warn("[Counter] No counter URL from endpoints.json — skipping report")
         return
     end
 
