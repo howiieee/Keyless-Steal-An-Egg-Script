@@ -22,10 +22,11 @@ end)
 -- ===========================
 
 -- ===== CONFIG =====
-local UI_URL      = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua"
-local COUNTER_URL = "https://sell-counter-temp2.bluealpha1365.workers.dev/report"
-local SELL_WAIT   = 1.5
-local MEME_DELAY  = 4
+local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua"
+local ENDPOINTS_URL   = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/endpoints.json"
+local COUNTER_FALLBACK = "https://sell-counter-temp2.bluealpha1365.workers.dev/report"
+local SELL_WAIT       = 1.5
+local MEME_DELAY      = 4
 
 local UI_CONFIG = {
     MEME_IMAGE_ID  = "rbxassetid://82403642047427",
@@ -33,6 +34,29 @@ local UI_CONFIG = {
     MEME_SIZE      = 380,
 }
 -- ==================
+
+-- ===== FETCH COUNTER URL FROM REMOTE =====
+local function fetchCounterUrl()
+    local ok, res = pcall(function()
+        return game:HttpGet(ENDPOINTS_URL, true)
+    end)
+    if ok and type(res) == "string" and #res > 0 then
+        local decodeOk, data = pcall(function()
+            return HttpService:JSONDecode(res)
+        end)
+        if decodeOk and type(data) == "table" and type(data.counter) == "string" then
+            print("[Loader] Using counter URL from endpoints.json:", data.counter)
+            return data.counter
+        else
+            warn("[Loader] endpoints.json malformed — using fallback")
+        end
+    else
+        warn("[Loader] Could not fetch endpoints.json — using fallback")
+    end
+    return COUNTER_FALLBACK
+end
+
+local COUNTER_URL = fetchCounterUrl()
 
 ------------------------------------------------------------
 -- UI MODULE
