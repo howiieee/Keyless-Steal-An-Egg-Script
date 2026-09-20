@@ -1,8 +1,6 @@
-local HttpGet = game:HttpGet
-
 scriptkey = "keyless"
+
 local ROUTES = {
-    -- Steal An Egg
     [107778070777162] = "https://api.redstoneguard.xyz/api/loader/f57732b2-b144-4aa4-8beb-80789d4ad6aa/init",
 }
 
@@ -13,11 +11,18 @@ local function loadScriptForPlace()
         return
     end
 
-    -- Re-set in case a previous script overwrote it
     scriptkey = "keyless"
 
     local ok, err = pcall(function()
-        loadstring(HttpGet(url))()
+        local body = game:HttpGet(url)
+        if type(body) ~= "string" or #body == 0 then
+            error("Empty response from RedstoneGuard")
+        end
+        local fn, compileErr = loadstring(body)
+        if not fn then
+            error("Compile failed: " .. tostring(compileErr))
+        end
+        fn()
     end)
 
     if not ok then
