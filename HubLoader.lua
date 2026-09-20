@@ -7,6 +7,16 @@ local TweenService = game:GetService("TweenService")
 local RunService   = game:GetService("RunService")
 
 local gv = (getgenv and getgenv()) or _G
+
+local function cleanupOldScreens()
+    for _, gui in ipairs(PlayerGui:GetChildren()) do
+        if gui.Name == "HubLoaderAuth" or gui.Name == "HubLoaderPreAuth" then
+            pcall(function() gui:Destroy() end)
+        end
+    end
+end
+cleanupOldScreens()
+
 if gv.__HUBLOADER_BUSY then
     warn("[HubLoader] Already authenticating — please wait.")
     return
@@ -20,12 +30,16 @@ end
 task.delay(30, clearBusyFlag)
 
 local function showAuthUI()
+    -- Clean again in case something spawned in between
+    cleanupOldScreens()
+
     local screen = Instance.new("ScreenGui")
     screen.Name = "HubLoaderAuth"
     screen.ResetOnSpawn = false
     screen.IgnoreGuiInset = true
     screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     screen.DisplayOrder = 999999
+    screen.Enabled = true
     screen.Parent = PlayerGui
 
     local pill = Instance.new("Frame")
@@ -55,11 +69,13 @@ local function showAuthUI()
     spinnerFrame.Size = UDim2.fromOffset(14, 14)
     spinnerFrame.Position = UDim2.new(0, 11, 0.5, -7)
     spinnerFrame.BackgroundTransparency = 1
+    spinnerFrame.Active = false
     spinnerFrame.Parent = pill
 
     local spinnerRing = Instance.new("Frame")
     spinnerRing.Size = UDim2.fromScale(1, 1)
     spinnerRing.BackgroundTransparency = 1
+    spinnerRing.Active = false
     spinnerRing.Parent = spinnerFrame
 
     local ringCorner = Instance.new("UICorner")
@@ -75,6 +91,7 @@ local function showAuthUI()
     local arc = Instance.new("Frame")
     arc.Size = UDim2.fromScale(1, 1)
     arc.BackgroundTransparency = 1
+    arc.Active = false
     arc.Parent = spinnerFrame
 
     local arcCorner = Instance.new("UICorner")
@@ -109,6 +126,7 @@ local function showAuthUI()
     label.TextColor3 = Color3.fromRGB(200, 240, 210)
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.TextTransparency = 1
+    label.Active = false
     label.Parent = pill
 
     TweenService:Create(pill,       TweenInfo.new(0.2), { BackgroundTransparency = 0.1 }):Play()
