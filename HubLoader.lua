@@ -1,4 +1,3 @@
--- ===== Set global so RedstoneGuard's core can find it =====
 scriptkey = "keyless"
 
 local Players      = game:GetService("Players")
@@ -7,9 +6,6 @@ local PlayerGui    = LocalPlayer:WaitForChild("PlayerGui")
 local TweenService = game:GetService("TweenService")
 local RunService   = game:GetService("RunService")
 
--- =========================================================
--- Re-entry guard — blocks double-execute during auth
--- =========================================================
 local gv = (getgenv and getgenv()) or _G
 if gv.__HUBLOADER_BUSY then
     warn("[HubLoader] Already authenticating — please wait.")
@@ -21,13 +17,8 @@ local function clearBusyFlag()
     gv.__HUBLOADER_BUSY = false
 end
 
--- Safety: auto-clear the flag after 30s no matter what happens
 task.delay(30, clearBusyFlag)
--- =========================================================
 
--- =========================================================
--- Small floating auth UI (top-center pill)
--- =========================================================
 local function showAuthUI()
     local screen = Instance.new("ScreenGui")
     screen.Name = "HubLoaderAuth"
@@ -37,18 +28,6 @@ local function showAuthUI()
     screen.DisplayOrder = 999999
     screen.Parent = PlayerGui
 
-    -- Invisible full-screen input blocker
-    local blocker = Instance.new("TextButton")
-    blocker.Name = "Blocker"
-    blocker.Size = UDim2.fromScale(1, 1)
-    blocker.BackgroundTransparency = 1
-    blocker.Text = ""
-    blocker.AutoButtonColor = false
-    blocker.Modal = true
-    blocker.Active = true
-    blocker.Parent = screen
-
-    -- The pill
     local pill = Instance.new("Frame")
     pill.Name = "Pill"
     pill.AnchorPoint = Vector2.new(0.5, 0)
@@ -71,7 +50,6 @@ local function showAuthUI()
     pillStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     pillStroke.Parent = pill
 
-    -- Spinner (a small rotating arc made from a UIStroke circle)
     local spinnerFrame = Instance.new("Frame")
     spinnerFrame.Name = "Spinner"
     spinnerFrame.Size = UDim2.fromOffset(14, 14)
@@ -94,7 +72,6 @@ local function showAuthUI()
     ringStroke.Transparency = 0.65
     ringStroke.Parent = spinnerRing
 
-    -- The active arc (a partial ring that rotates)
     local arc = Instance.new("Frame")
     arc.Size = UDim2.fromScale(1, 1)
     arc.BackgroundTransparency = 1
@@ -110,7 +87,6 @@ local function showAuthUI()
     arcStroke.Transparency = 0.05
     arcStroke.Parent = arc
 
-    -- Rotation loop
     local spinning = true
     task.spawn(function()
         while spinning and spinnerFrame.Parent do
@@ -123,7 +99,6 @@ local function showAuthUI()
         end
     end)
 
-    -- Label
     local label = Instance.new("TextLabel")
     label.BackgroundTransparency = 1
     label.Position = UDim2.new(0, 30, 0, 0)
@@ -136,7 +111,6 @@ local function showAuthUI()
     label.TextTransparency = 1
     label.Parent = pill
 
-    -- Fade in
     TweenService:Create(pill,       TweenInfo.new(0.2), { BackgroundTransparency = 0.1 }):Play()
     TweenService:Create(pillStroke, TweenInfo.new(0.2), { Transparency = 0.35 }):Play()
     TweenService:Create(label,      TweenInfo.new(0.2), { TextTransparency = 0 }):Play()
@@ -153,16 +127,10 @@ local function showAuthUI()
     }
 end
 
--- =========================================================
--- ROUTES — add new games here as you set them up
--- =========================================================
 local ROUTES = {
     [107778070777162] = "https://api.redstoneguard.xyz/api/loader/f57732b2-b144-4aa4-8beb-80789d4ad6aa/init",
 }
 
--- =========================================================
--- Main flow
--- =========================================================
 local function loadScriptForPlace()
     local url = ROUTES[game.PlaceId]
     if not url then
@@ -173,16 +141,13 @@ local function loadScriptForPlace()
 
     scriptkey = "keyless"
 
-    -- Show small pill + input blocker
     local authUI = showAuthUI()
 
-    -- Safety net: kill the UI if auth hangs
     task.delay(20, function()
         pcall(function() authUI.destroy() end)
         clearBusyFlag()
     end)
 
-    -- Run RedstoneGuard auth
     local ok, err = pcall(function()
         local body = game:HttpGet(url)
         if type(body) ~= "string" or #body == 0 then
@@ -195,7 +160,6 @@ local function loadScriptForPlace()
         fn()
     end)
 
-    -- Cleanup — the LoaderUI takes over from here
     pcall(function() authUI.destroy() end)
     clearBusyFlag()
 
