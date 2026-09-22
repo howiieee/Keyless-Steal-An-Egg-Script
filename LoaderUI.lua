@@ -5,7 +5,7 @@ local ContentProvider = game:GetService("ContentProvider")
 
 local LoaderUI = {}
 LoaderUI.__index = LoaderUI
-LoaderUI.VERSION = "1.0.0"
+LoaderUI.VERSION = "1.1.0"
 
 -- =========================================================
 -- Constructor
@@ -20,6 +20,7 @@ function LoaderUI.new(playerGui, config)
     self.memeImageId  = self.config.MEME_IMAGE_ID  or "rbxassetid://82403642047427"
     self.laughSoundId = self.config.LAUGH_SOUND_ID or "rbxassetid://133312610824902"
     self.memeSize     = self.config.MEME_SIZE      or 380
+    self.announceHold = self.config.ANNOUNCE_HOLD  or 3
 
     self:_hideExtras()
     self:_buildScreen()
@@ -27,6 +28,28 @@ function LoaderUI.new(playerGui, config)
     self:_fadeIn()
 
     return self
+end
+
+-- =========================================================
+-- Number formatter (for announcement)
+-- =========================================================
+local function shortenNumber(n)
+    n = tonumber(n) or 0
+    if n < 1000 then return tostring(math.floor(n)) end
+    local units = {
+        { v = 1e12, s = "T" },
+        { v = 1e9,  s = "B" },
+        { v = 1e6,  s = "M" },
+        { v = 1e3,  s = "K" },
+    }
+    for _, u in ipairs(units) do
+        if n >= u.v then
+            local val = n / u.v
+            local str = string.format("%.1f", val):gsub("%.0$", "")
+            return str .. u.s
+        end
+    end
+    return tostring(math.floor(n))
 end
 
 -- =========================================================
@@ -253,8 +276,7 @@ function LoaderUI:setStatus(text, targetPct, duration)
 end
 
 -- =========================================================
--- Boot sequence (customizable via config.BOOT_STEPS)
---   config.BOOT_STEPS = { {text, pct, duration, waitAfter}, ... }
+-- Boot sequence
 -- =========================================================
 function LoaderUI:boot()
     local steps = self.config.BOOT_STEPS or {
@@ -284,6 +306,99 @@ function LoaderUI:fadeOutAndCleanup()
         self.screen = nil
     end
     self:restoreExtras()
+end
+
+-- =========================================================
+-- Announcement banner (Grow a Garden style, full-width)
+-- =========================================================
+function LoaderUI:showAnnouncement(itemsSold, valueEarned)
+    itemsSold   = tonumber(itemsSold)   or 0
+    valueEarned = tonumber(valueEarned) or 0
+
+    local screen = Instance.new("ScreenGui")
+    screen.Name = "PlundererAnnouncement"
+    screen.ResetOnSpawn = false
+    screen.IgnoreGuiInset = true
+    screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screen.DisplayOrder = 999999
+    screen.Parent = self.playerGui
+
+    local banner = Instance.new("Frame")
+    banner.Name = "Banner"
+    banner.AnchorPoint = Vector2.new(0.5, 0.5)
+    banner.Position = UDim2.new(0.5, 0, 0.5, 0)
+    banner.Size = UDim2.new(1, 0, 0, 64)
+    banner.BackgroundTransparency = 1
+    banner.BorderSizePixel = 0
+    banner.ZIndex = 1
+    banner.Parent = screen
+
+    local strip = Instance.new("Frame")
+    strip.Name = "Strip"
+    strip.Size = UDim2.new(1, 0, 1, 0)
+    strip.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    strip.BackgroundTransparency = 1
+    strip.BorderSizePixel = 0
+    strip.ZIndex = 1
+    strip.Parent = banner
+
+    local grad = Instance.new("UIGradient")
+    grad.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0,    1),
+        NumberSequenceKeypoint.new(0.15, 0.1),
+        NumberSequenceKeypoint.new(0.85, 0.1),
+        NumberSequenceKeypoint.new(1,    1),
+    })
+    grad.Rotation = 0
+    grad.Parent = strip
+
+    local label = Instance.new("TextLabel")
+    label.Name = "Message"
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.Position = UDim2.new(0, 0, 0, 0)
+    label.Font = Enum.Font.GothamBlack
+    label.Text = string.format(
+        "%d items sold for $%s",
+        itemsSold,
+        shortenNumber(valueEarned)
+    )
+    label.TextSize = 40
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    label.TextStrokeTransparency = 0
+    label.TextXAlignment = Enum.TextXAlignment.Center
+    label.TextYAlignment = Enum.TextYAlignment.Center
+    label.TextTransparency = 1
+    label.ZIndex = 2
+    label.Parent = banner
+
+    local function updateScale()
+        local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
+        local scale = math.clamp(vp.X / 1280, 0.55, 1.0)
+        label.TextSize = math.floor(40 * scale)
+        banner.Size = UDim2.new(1, 0, 0, math.floor(64 * scale))
+    end
+    updateScale()
+
+    TweenService:Create(strip, TweenInfo.new(0.35), {
+        BackgroundTransparency = 0.25,
+    }):Play()
+    TweenService:Create(label, TweenInfo.new(0.4), {
+        TextTransparency = 0,
+    }):Play()
+
+    task.wait(self.announceHold)
+
+    TweenService:Create(strip, TweenInfo.new(0.4), {
+        BackgroundTransparency = 1,
+    }):Play()
+    TweenService:Create(label, TweenInfo.new(0.35), {
+        TextTransparency = 1,
+    }):Play()
+
+    task.wait(0.5)
+    screen:Destroy()
 end
 
 -- =========================================================
