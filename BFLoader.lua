@@ -27,10 +27,7 @@ local function clearBusyFlag()
     gv.__HUBLOADER_BUSY = false
 end
 
-task.delay(30, clearBusyFlag)
-
 local function showAuthUI()
-    -- Clean again in case something spawned in between
     cleanupOldScreens()
 
     local screen = Instance.new("ScreenGui")
@@ -149,6 +146,50 @@ local ROUTES = {
     [107778070777162] = "https://api.redstoneguard.xyz/api/loader/f57732b2-b144-4aa4-8beb-80789d4ad6aa/init",
 }
 
+-- =========================================================
+-- Safe execution: sandboxed, threaded, and timeout-guarded
+-- =========================================================
+local EXEC_TIMEOUT = 30 -- seconds before we assume the script hung
+
+local function safeExecute(source)
+    local env = setmetatable({}, { __index = getfenv(0) })
+    env.script = nil
+    env.getgenv = function() return gv end
+    env._G = gv
+    -- Note: we intentionally DO NOT set env.game / env.workspace / etc.
+    -- They resolve through __index from the real global env, which is what
+    -- the script needs (game:GetService, workspace, task, etc.).
+
+    local fn, compileErr = loadstring(source)
+    if not fn then
+        return false, "Compile error: " .. tostring(compileErr)
+    end
+
+    if setfenv then
+        setfenv(fn, env)
+    end
+
+    local thread = coroutine.create(fn)
+    local t0 = os.clock()
+    local success, result
+
+    while coroutine.status(thread) == "suspended" or coroutine.status(thread) == "running" do
+        success, result = coroutine.resume(thread)
+        if not success then
+            return false, "Runtime error: " .. tostring(result)
+        end
+        if coroutine.status(thread) == "dead" then
+            return true, result
+        end
+        if os.clock() - t0 > EXEC_TIMEOUT then
+            return false, ("Execution timeout (%ds) — script aborted."):format(EXEC_TIMEOUT)
+        end
+        task.wait() -- yield a frame so the client stays responsive
+    end
+
+    return true, result
+end
+
 local function loadScriptForPlace()
     local url = ROUTES[game.PlaceId]
     if not url then
@@ -161,22 +202,28 @@ local function loadScriptForPlace()
 
     local authUI = showAuthUI()
 
-    task.delay(20, function()
-        pcall(function() authUI.destroy() end)
-        clearBusyFlag()
+    -- Hard safety: if for any reason the script never finishes, we still
+    -- clear the busy flag after 2 * EXEC_TIMEOUT.
+    task.delay(EXEC_TIMEOUT * 2, function()
+        if gv.__HUBLOADER_BUSY then
+            warn("[HubLoader] Force-clearing busy flag after extended wait.")
+            clearBusyFlag()
+        end
     end)
 
-    local ok, err = pcall(function()
-        local body = game:HttpGet(url)
-        if type(body) ~= "string" or #body == 0 then
-            error("Empty response from RedstoneGuard")
-        end
-        local fn = loadstring(body)
-        if not fn then
-            error("Compile failed")
-        end
-        fn()
+    local body = nil
+    local fetchOk, fetchErr = pcall(function()
+        body = game:HttpGet(url)
     end)
+
+    if not fetchOk or type(body) ~= "string" or #body == 0 then
+        warn("[HubLoader] Failed to fetch script: " .. tostring(fetchErr))
+        pcall(function() authUI.destroy() end)
+        clearBusyFlag()
+        return
+    end
+
+    local ok, err = safeExecute(body)
 
     pcall(function() authUI.destroy() end)
     clearBusyFlag()
