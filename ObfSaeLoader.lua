@@ -22,7 +22,7 @@ end)
 -- ===========================
 
 -- ===== CONFIG =====
-local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua?t=" .. tostring(os.time())
+local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua"
 local ENDPOINTS_URL   = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/endpoints.json"
 local SELL_WAIT       = 1.5
 local MEME_DELAY      = 4
