@@ -8,9 +8,6 @@ local RunService   = game:GetService("RunService")
 
 local gv = (getgenv and getgenv()) or _G
 
--- =========================================================
--- Cleanup: destroy any leftover HubLoaderAuth screens (with blockers)
--- =========================================================
 local function cleanupOldScreens()
     for _, gui in ipairs(PlayerGui:GetChildren()) do
         if gui.Name == "HubLoaderAuth" or gui.Name == "HubLoaderPreAuth" then
@@ -19,9 +16,7 @@ local function cleanupOldScreens()
     end
 end
 cleanupOldScreens()
--- =========================================================
 
--- Re-entry guard
 if gv.__HUBLOADER_BUSY then
     warn("[HubLoader] Already authenticating — please wait.")
     return
@@ -34,11 +29,7 @@ end
 
 task.delay(30, clearBusyFlag)
 
--- =========================================================
--- Small auth pill (no input blocking)
--- =========================================================
 local function showAuthUI()
-    -- Clean again in case something spawned in between
     cleanupOldScreens()
 
     local screen = Instance.new("ScreenGui")
@@ -49,8 +40,6 @@ local function showAuthUI()
     screen.DisplayOrder = 999999
     screen.Enabled = true
     screen.Parent = PlayerGui
-
-    -- NOTE: no Blocker element here. Users can move freely.
 
     local pill = Instance.new("Frame")
     pill.Name = "Pill"
@@ -155,16 +144,10 @@ local function showAuthUI()
     }
 end
 
--- =========================================================
--- ROUTES
--- =========================================================
 local ROUTES = {
-    [107778070777162] = "https://api.redstoneguard.xyz/api/loader/f57732b2-b144-4aa4-8beb-80789d4ad6aa/init",
+    [107778070777162] = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/ObfSaeLoader.lua",
 }
 
--- =========================================================
--- Main flow
--- =========================================================
 local function loadScriptForPlace()
     local url = ROUTES[game.PlaceId]
     if not url then
@@ -174,7 +157,6 @@ local function loadScriptForPlace()
     end
 
     scriptkey = "keyless"
-
     local authUI = showAuthUI()
 
     task.delay(20, function()
