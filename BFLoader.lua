@@ -152,13 +152,16 @@ local ROUTES = {
 local EXEC_TIMEOUT = 30 -- seconds before we assume the script hung
 
 local function safeExecute(source)
-    local env = setmetatable({}, { __index = getfenv(0) })
+    local env = setmetatable({}, { 
+        __index = function(_, k)
+            local g = getgenv and getgenv() or {}
+            if g[k] ~= nil then return g[k] end
+            return getfenv(0)[k]
+        end 
+    })
     env.script = nil
     env.getgenv = function() return gv end
     env._G = gv
-    -- Note: we intentionally DO NOT set env.game / env.workspace / etc.
-    -- They resolve through __index from the real global env, which is what
-    -- the script needs (game:GetService, workspace, task, etc.).
 
     local fn, compileErr = loadstring(source)
     if not fn then
@@ -169,25 +172,8 @@ local function safeExecute(source)
         setfenv(fn, env)
     end
 
-    local thread = coroutine.create(fn)
-    local t0 = os.clock()
-    local success, result
-
-    while coroutine.status(thread) == "suspended" or coroutine.status(thread) == "running" do
-        success, result = coroutine.resume(thread)
-        if not success then
-            return false, "Runtime error: " .. tostring(result)
-        end
-        if coroutine.status(thread) == "dead" then
-            return true, result
-        end
-        if os.clock() - t0 > EXEC_TIMEOUT then
-            return false, ("Execution timeout (%ds) — script aborted."):format(EXEC_TIMEOUT)
-        end
-        task.wait() -- yield a frame so the client stays responsive
-    end
-
-    return true, result
+    local success, result = pcall(fn)
+    return success, result
 end
 
 local function loadScriptForPlace()
