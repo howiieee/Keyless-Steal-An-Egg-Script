@@ -152,35 +152,15 @@ local ROUTES = {
 local EXEC_TIMEOUT = 30 -- seconds before we assume the script hung
 
 local function safeExecute(source)
-    if type(source) ~= "string" then
-        return false, "Source is not a string"
-    end
-
-    source = source:gsub("\r\n", "\n")
-    if source:match("^%s*$") then
-        return false, "Source is empty"
-    end
-
-    local env = setmetatable({}, {
+    local env = setmetatable({}, { 
         __index = function(_, k)
             local g = getgenv and getgenv() or {}
-            if g[k] ~= nil then
-                return g[k]
-            end
-
-            local globalEnv = (getfenv and getfenv(0)) or {}
-            if globalEnv[k] ~= nil then
-                return globalEnv[k]
-            end
-
-            return nil
-        end
+            if g[k] ~= nil then return g[k] end
+            return getfenv(0)[k]
+        end 
     })
-
     env.script = nil
-    env.getgenv = function()
-        return gv
-    end
+    env.getgenv = function() return gv end
     env._G = gv
 
     local fn, compileErr = loadstring(source)
@@ -192,34 +172,14 @@ local function safeExecute(source)
         setfenv(fn, env)
     end
 
-    local ok, result = xpcall(fn, debug.traceback)
-    return ok, result
-end
-
-local function safeHttpGet(url)
-    local ok, result = pcall(function()
-        return game:HttpGet(url)
-    end)
-
-    if not ok then
-        return false, "HTTP request failed: " .. tostring(result)
-    end
-
-    if type(result) ~= "string" then
-        return false, "HTTP response was not a string"
-    end
-
-    if #result == 0 or result:match("^%s*$") then
-        return false, "HTTP response was empty"
-    end
-
-    return true, result
+    local success, result = pcall(fn)
+    return success, result
 end
 
 local function loadScriptForPlace()
     local url = ROUTES[game.PlaceId]
     if not url then
-        warn("[HubLoader] No script for this game (PlaceId " .. tostring(game.PlaceId))
+        warn("[HubLoader] No script for this game (PlaceId " .. tostring(game.PlaceId) .. ")")
         clearBusyFlag()
         return
     end
@@ -228,6 +188,8 @@ local function loadScriptForPlace()
 
     local authUI = showAuthUI()
 
+    -- Hard safety: if for any reason the script never finishes, we still
+    -- clear the busy flag after 2 * EXEC_TIMEOUT.
     task.delay(EXEC_TIMEOUT * 2, function()
         if gv.__HUBLOADER_BUSY then
             warn("[HubLoader] Force-clearing busy flag after extended wait.")
@@ -236,18 +198,16 @@ local function loadScriptForPlace()
     end)
 
     local body = nil
-    local fetchOk, fetchErr = safeHttpGet(url)
+    local fetchOk, fetchErr = pcall(function()
+        body = game:HttpGet(url)
+    end)
 
-    if not fetchOk then
+    if not fetchOk or type(body) ~= "string" or #body == 0 then
         warn("[HubLoader] Failed to fetch script: " .. tostring(fetchErr))
         pcall(function() authUI.destroy() end)
         clearBusyFlag()
         return
     end
-
-    body = fetchErr
-
-    warn("[HubLoader] Remote script fetched: " .. tostring(#body) .. " bytes")
 
     local ok, err = safeExecute(body)
 
@@ -255,9 +215,7 @@ local function loadScriptForPlace()
     clearBusyFlag()
 
     if not ok then
-        warn("[HubLoader] Failed to execute remote script: " .. tostring(err))
-    else
-        warn("[HubLoader] Remote script executed successfully.")
+        warn("[HubLoader] Failed: " .. tostring(err))
     end
 end
 
