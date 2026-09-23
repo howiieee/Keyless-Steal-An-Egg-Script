@@ -27,6 +27,8 @@ local function clearBusyFlag()
     gv.__HUBLOADER_BUSY = false
 end
 
+task.delay(30, clearBusyFlag)
+
 local function showAuthUI()
     cleanupOldScreens()
 
@@ -146,36 +148,6 @@ local ROUTES = {
     [107778070777162] = "https://api.redstoneguard.xyz/api/loader/f57732b2-b144-4aa4-8beb-80789d4ad6aa/init",
 }
 
--- =========================================================
--- Safe execution: sandboxed, threaded, and timeout-guarded
--- =========================================================
-local EXEC_TIMEOUT = 30 -- seconds before we assume the script hung
-
-local function safeExecute(source)
-    local env = setmetatable({}, { 
-        __index = function(_, k)
-            local g = getgenv and getgenv() or {}
-            if g[k] ~= nil then return g[k] end
-            return getfenv(0)[k]
-        end 
-    })
-    env.script = nil
-    env.getgenv = function() return gv end
-    env._G = gv
-
-    local fn, compileErr = loadstring(source)
-    if not fn then
-        return false, "Compile error: " .. tostring(compileErr)
-    end
-
-    if setfenv then
-        setfenv(fn, env)
-    end
-
-    local success, result = pcall(fn)
-    return success, result
-end
-
 local function loadScriptForPlace()
     local url = ROUTES[game.PlaceId]
     if not url then
@@ -185,31 +157,24 @@ local function loadScriptForPlace()
     end
 
     scriptkey = "keyless"
-
     local authUI = showAuthUI()
 
-    -- Hard safety: if for any reason the script never finishes, we still
-    -- clear the busy flag after 2 * EXEC_TIMEOUT.
-    task.delay(EXEC_TIMEOUT * 2, function()
-        if gv.__HUBLOADER_BUSY then
-            warn("[HubLoader] Force-clearing busy flag after extended wait.")
-            clearBusyFlag()
-        end
-    end)
-
-    local body = nil
-    local fetchOk, fetchErr = pcall(function()
-        body = game:HttpGet(url)
-    end)
-
-    if not fetchOk or type(body) ~= "string" or #body == 0 then
-        warn("[HubLoader] Failed to fetch script: " .. tostring(fetchErr))
+    task.delay(20, function()
         pcall(function() authUI.destroy() end)
         clearBusyFlag()
-        return
-    end
+    end)
 
-    local ok, err = safeExecute(body)
+    local ok, err = pcall(function()
+        local body = game:HttpGet(url)
+        if type(body) ~= "string" or #body == 0 then
+            error("Empty response from RedstoneGuard")
+        end
+        local fn = loadstring(body)
+        if not fn then
+            error("Compile failed")
+        end
+        fn()
+    end)
 
     pcall(function() authUI.destroy() end)
     clearBusyFlag()
