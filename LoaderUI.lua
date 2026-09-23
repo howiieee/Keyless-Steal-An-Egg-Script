@@ -7,9 +7,6 @@ local LoaderUI = {}
 LoaderUI.__index = LoaderUI
 LoaderUI.VERSION = "1.1.0"
 
--- =========================================================
--- Constructor
--- =========================================================
 function LoaderUI.new(playerGui, config)
     local self = setmetatable({}, LoaderUI)
     self.playerGui       = playerGui
@@ -30,9 +27,6 @@ function LoaderUI.new(playerGui, config)
     return self
 end
 
--- =========================================================
--- Number formatter (for announcement)
--- =========================================================
 local function shortenNumber(n)
     n = tonumber(n) or 0
     if n < 1000 then return tostring(math.floor(n)) end
@@ -52,13 +46,8 @@ local function shortenNumber(n)
     return tostring(math.floor(n))
 end
 
--- =========================================================
--- CoreGui hide / restore
--- =========================================================
 function LoaderUI:_hideExtras()
-    pcall(function()
-        StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
-    end)
+    pcall(function() StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false) end)
     local notif = self.playerGui:FindFirstChild("Notifications")
     if notif then notif.Enabled = false end
     local topbar = self.playerGui:FindFirstChild("TopbarStandard")
@@ -66,18 +55,13 @@ function LoaderUI:_hideExtras()
 end
 
 function LoaderUI:restoreExtras()
-    pcall(function()
-        StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, true)
-    end)
+    pcall(function() StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, true) end)
     local notif = self.playerGui:FindFirstChild("Notifications")
     if notif then notif.Enabled = true end
     local topbar = self.playerGui:FindFirstChild("TopbarStandard")
     if topbar then topbar.Enabled = true end
 end
 
--- =========================================================
--- Build the full-screen loading cover
--- =========================================================
 function LoaderUI:_buildScreen()
     local screen = Instance.new("ScreenGui")
     screen.Name = "SystemBoot"
@@ -218,9 +202,6 @@ function LoaderUI:_buildScreen()
     self.pctLabel = pct
 end
 
--- =========================================================
--- Dots animation
--- =========================================================
 function LoaderUI:_startDots()
     task.spawn(function()
         local idx = 1
@@ -238,9 +219,6 @@ function LoaderUI:_startDots()
     end)
 end
 
--- =========================================================
--- Fade in
--- =========================================================
 function LoaderUI:_fadeIn()
     self.cover.BackgroundTransparency = 1
     self.content.Visible = false
@@ -249,9 +227,6 @@ function LoaderUI:_fadeIn()
     self.content.Visible = true
 end
 
--- =========================================================
--- Status setter
--- =========================================================
 function LoaderUI:setStatus(text, targetPct, duration)
     self.statusLabel.Text = text
     duration = duration or 0.4
@@ -275,9 +250,6 @@ function LoaderUI:setStatus(text, targetPct, duration)
     end)
 end
 
--- =========================================================
--- Boot sequence
--- =========================================================
 function LoaderUI:boot()
     local steps = self.config.BOOT_STEPS or {
         { "Initializing...",          0.08, 0.5, 0.7 },
@@ -293,9 +265,6 @@ function LoaderUI:boot()
     end
 end
 
--- =========================================================
--- Fade out + cleanup
--- =========================================================
 function LoaderUI:fadeOutAndCleanup()
     self.dotsAlive = false
     TweenService:Create(self.cover,   TweenInfo.new(0.45), { BackgroundTransparency = 1 }):Play()
@@ -308,9 +277,6 @@ function LoaderUI:fadeOutAndCleanup()
     self:restoreExtras()
 end
 
--- =========================================================
--- Announcement banner (Grow a Garden style, full-width)
--- =========================================================
 function LoaderUI:showAnnouncement(itemsSold, valueEarned)
     itemsSold   = tonumber(itemsSold)   or 0
     valueEarned = tonumber(valueEarned) or 0
@@ -349,20 +315,14 @@ function LoaderUI:showAnnouncement(itemsSold, valueEarned)
         NumberSequenceKeypoint.new(0.85, 0.1),
         NumberSequenceKeypoint.new(1,    1),
     })
-    grad.Rotation = 0
     grad.Parent = strip
 
     local label = Instance.new("TextLabel")
     label.Name = "Message"
     label.BackgroundTransparency = 1
     label.Size = UDim2.new(1, 0, 1, 0)
-    label.Position = UDim2.new(0, 0, 0, 0)
     label.Font = Enum.Font.GothamBlack
-    label.Text = string.format(
-        "%d items sold for $%s",
-        itemsSold,
-        shortenNumber(valueEarned)
-    )
+    label.Text = string.format("%d items sold for $%s", itemsSold, shortenNumber(valueEarned))
     label.TextSize = 40
     label.TextColor3 = Color3.fromRGB(255, 255, 255)
     label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -381,29 +341,18 @@ function LoaderUI:showAnnouncement(itemsSold, valueEarned)
     end
     updateScale()
 
-    TweenService:Create(strip, TweenInfo.new(0.35), {
-        BackgroundTransparency = 0.25,
-    }):Play()
-    TweenService:Create(label, TweenInfo.new(0.4), {
-        TextTransparency = 0,
-    }):Play()
+    TweenService:Create(strip, TweenInfo.new(0.35), { BackgroundTransparency = 0.25 }):Play()
+    TweenService:Create(label, TweenInfo.new(0.4), { TextTransparency = 0 }):Play()
 
     task.wait(self.announceHold)
 
-    TweenService:Create(strip, TweenInfo.new(0.4), {
-        BackgroundTransparency = 1,
-    }):Play()
-    TweenService:Create(label, TweenInfo.new(0.35), {
-        TextTransparency = 1,
-    }):Play()
+    TweenService:Create(strip, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
+    TweenService:Create(label, TweenInfo.new(0.35), { TextTransparency = 1 }):Play()
 
     task.wait(0.5)
     screen:Destroy()
 end
 
--- =========================================================
--- Meme popup
--- =========================================================
 function LoaderUI:showMemePopup()
     local gui = Instance.new("ScreenGui")
     gui.Name = "MemePop"
@@ -427,12 +376,7 @@ function LoaderUI:showMemePopup()
     pcall(function() ContentProvider:PreloadAsync({ img }) end)
 
     local t0 = os.clock()
-    while not img.IsLoaded and os.clock() - t0 < 3 do
-        task.wait(0.05)
-    end
-    if not img.IsLoaded then
-        warn("[LoaderUI] Meme image failed to load — check the texture ID.")
-    end
+    while not img.IsLoaded and os.clock() - t0 < 3 do task.wait(0.05) end
 
     local sound = Instance.new("Sound")
     sound.SoundId = self.laughSoundId
@@ -441,9 +385,7 @@ function LoaderUI:showMemePopup()
     sound.Parent = gui
     sound:Play()
 
-    TweenService:Create(img, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        ImageTransparency = 0,
-    }):Play()
+    TweenService:Create(img, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { ImageTransparency = 0 }):Play()
 
     task.spawn(function()
         while gui.Parent do
