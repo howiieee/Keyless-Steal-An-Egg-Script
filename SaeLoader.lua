@@ -88,9 +88,6 @@ end
 local LoaderUI = loadUIModule()
 local ui = LoaderUI.new(PlayerGui, UI_CONFIG)
 
-------------------------------------------------------------
--- UPDATED ANNOUNCEMENT BANNER (Centered Sleek Bar)
-------------------------------------------------------------
 local function showAnnouncement(itemsSold, valueEarned)
     local screen = Instance.new("ScreenGui")
     screen.Name = "PlundererAnnouncement"
@@ -100,67 +97,43 @@ local function showAnnouncement(itemsSold, valueEarned)
     screen.DisplayOrder = 999999
     screen.Parent = PlayerGui
 
-    local banner = Instance.new("Frame")
-    banner.Name = "Banner"
-    banner.AnchorPoint = Vector2.new(0.5, 0.5)
-    banner.Position = UDim2.new(0.5, 0, 0.5, 0)
-    banner.Size = UDim2.new(1, 0, 0, 64)
-    banner.BackgroundTransparency = 1
-    banner.BorderSizePixel = 0
-    banner.ZIndex = 1
-    banner.Parent = screen
+    local card = Instance.new("Frame")
+    card.AnchorPoint = Vector2.new(0.5, 0)
+    card.Position = UDim2.new(0.5, 0, 0, -100)
+    card.Size = UDim2.fromOffset(520, 64)
+    card.BackgroundColor3 = Color3.fromRGB(12, 14, 22)
+    card.BackgroundTransparency = 0.05
+    card.BorderSizePixel = 0
+    card.Parent = screen
+    Instance.new("UICorner", card).CornerRadius = UDim.new(0, 14)
 
-    local strip = Instance.new("Frame")
-    strip.Name = "Strip"
-    strip.Size = UDim2.new(1, 0, 1, 0)
-    strip.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
-    strip.BackgroundTransparency = 1
-    strip.BorderSizePixel = 0
-    strip.ZIndex = 1
-    strip.Parent = banner
+    local cardStroke = Instance.new("UIStroke")
+    cardStroke.Color = Color3.fromRGB(128, 255, 160)
+    cardStroke.Thickness = 1.5
+    cardStroke.Transparency = 0.25
+    cardStroke.Parent = card
 
-    local grad = Instance.new("UIGradient")
-    grad.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0,    1),
-        NumberSequenceKeypoint.new(0.15, 0.1),
-        NumberSequenceKeypoint.new(0.85, 0.1),
-        NumberSequenceKeypoint.new(1,    1),
-    })
-    grad.Parent = strip
+    local main = Instance.new("TextLabel")
+    main.BackgroundTransparency = 1
+    main.Position = UDim2.fromOffset(28, 0)
+    main.Size = UDim2.new(1, -40, 1, 0)
+    main.Font = Enum.Font.GothamBold
+    main.Text = string.format("%d items sold for $%s", itemsSold or 0, shortenNumber(valueEarned or 0))
+    main.TextSize = 18
+    main.TextColor3 = Color3.fromRGB(245, 248, 255)
+    main.TextXAlignment = Enum.TextXAlignment.Left
+    main.TextTransparency = 1
+    main.Parent = card
 
-    local label = Instance.new("TextLabel")
-    label.Name = "Message"
-    label.BackgroundTransparency = 1
-    label.Size = UDim2.new(1, 0, 1, 0)
-    label.Font = Enum.Font.GothamBlack
-    label.Text = string.format("%d items sold for $%s", itemsSold or 0, shortenNumber(valueEarned or 0))
-    label.TextSize = 40
-    label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-    label.TextStrokeTransparency = 0
-    label.TextXAlignment = Enum.TextXAlignment.Center
-    label.TextYAlignment = Enum.TextYAlignment.Center
-    label.TextTransparency = 1
-    label.ZIndex = 2
-    label.Parent = banner
-
-    local function updateScale()
-        local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
-        local scale = math.clamp(vp.X / 1280, 0.55, 1.0)
-        label.TextSize = math.floor(40 * scale)
-        banner.Size = UDim2.new(1, 0, 0, math.floor(64 * scale))
-    end
-    updateScale()
-
-    TweenService:Create(strip, TweenInfo.new(0.35), { BackgroundTransparency = 0.25 }):Play()
-    TweenService:Create(label, TweenInfo.new(0.4), { TextTransparency = 0 }):Play()
+    TweenService:Create(card, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Position = UDim2.new(0.5, 0, 0, 20) }):Play()
+    TweenService:Create(main, TweenInfo.new(0.4), { TextTransparency = 0 }):Play()
 
     task.wait(ANNOUNCE_HOLD)
 
-    TweenService:Create(strip, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
-    TweenService:Create(label, TweenInfo.new(0.35), { TextTransparency = 1 }):Play()
+    TweenService:Create(card, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Position = UDim2.new(0.5, 0, 0, -100) }):Play()
+    TweenService:Create(main, TweenInfo.new(0.35), { TextTransparency = 1 }):Play()
 
-    task.wait(0.5)
+    task.wait(0.6)
     screen:Destroy()
 end
 
