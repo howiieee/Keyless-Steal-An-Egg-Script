@@ -5,13 +5,12 @@ local LocalPlayer  = Players.LocalPlayer
 local PlayerGui    = LocalPlayer:WaitForChild("PlayerGui")
 local TweenService = game:GetService("TweenService")
 local RunService   = game:GetService("RunService")
-local HttpService  = game:GetService("HttpService")
 
 local gv = (getgenv and getgenv()) or _G
 
 local function cleanupOldScreens()
     for _, gui in ipairs(PlayerGui:GetChildren()) do
-        if gui.Name == "HubLoaderAuth" or gui.Name == "HubLoaderPreAuth" or gui.Name == "HubLoaderError" then
+        if gui.Name == "HubLoaderAuth" or gui.Name == "HubLoaderPreAuth" then
             pcall(function() gui:Destroy() end)
         end
     end
@@ -30,84 +29,6 @@ end
 
 task.delay(30, clearBusyFlag)
 
--- =========================================================
--- Error UI (Displays Maintenance Messages)
--- =========================================================
-local function showErrorUI(messageText)
-    cleanupOldScreens()
-
-    local screen = Instance.new("ScreenGui")
-    screen.Name = "HubLoaderError"
-    screen.ResetOnSpawn = false
-    screen.IgnoreGuiInset = true
-    screen.DisplayOrder = 999999
-    screen.Parent = PlayerGui
-
-    local bg = Instance.new("Frame")
-    bg.Size = UDim2.fromScale(1, 1)
-    bg.BackgroundColor3 = Color3.fromRGB(12, 12, 18)
-    bg.BackgroundTransparency = 0.3
-    bg.BorderSizePixel = 0
-    bg.Parent = screen
-
-    local box = Instance.new("Frame")
-    box.Size = UDim2.fromOffset(360, 140)
-    box.Position = UDim2.fromScale(0.5, 0.5)
-    box.AnchorPoint = Vector2.new(0.5, 0.5)
-    box.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
-    box.Parent = bg
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 12)
-    corner.Parent = box
-
-    local stroke = Instance.new("UIStroke")
-    stroke.Color = Color3.fromRGB(255, 85, 85)
-    stroke.Thickness = 1.5
-    stroke.Transparency = 0.2
-    stroke.Parent = box
-
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, 40)
-    title.BackgroundTransparency = 1
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 18
-    title.TextColor3 = Color3.fromRGB(255, 85, 85)
-    title.Text = "Connection Rejected"
-    title.Parent = box
-
-    local desc = Instance.new("TextLabel")
-    desc.Size = UDim2.new(1, -40, 1, -50)
-    desc.Position = UDim2.fromOffset(20, 35)
-    desc.BackgroundTransparency = 1
-    desc.Font = Enum.Font.GothamMedium
-    desc.TextSize = 14
-    desc.TextColor3 = Color3.fromRGB(220, 220, 230)
-    desc.TextWrapped = true
-    desc.Text = messageText or "An unknown error occurred."
-    desc.Parent = box
-
-    -- Animate In
-    box.Size = UDim2.fromOffset(340, 120)
-    TweenService:Create(box, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = UDim2.fromOffset(360, 140)
-    }):Play()
-
-    -- Auto-destroy after 5 seconds
-    task.delay(5, function()
-        TweenService:Create(box, TweenInfo.new(0.2), { BackgroundTransparency = 1 }):Play()
-        TweenService:Create(desc, TweenInfo.new(0.2), { TextTransparency = 1 }):Play()
-        TweenService:Create(title, TweenInfo.new(0.2), { TextTransparency = 1 }):Play()
-        TweenService:Create(stroke, TweenInfo.new(0.2), { Transparency = 1 }):Play()
-        TweenService:Create(bg, TweenInfo.new(0.2), { BackgroundTransparency = 1 }):Play()
-        task.wait(0.25)
-        pcall(function() screen:Destroy() end)
-    end)
-end
-
--- =========================================================
--- Authentication UI
--- =========================================================
 local function showAuthUI()
     cleanupOldScreens()
 
@@ -230,8 +151,7 @@ local ROUTES = {
 local function loadScriptForPlace()
     local url = ROUTES[game.PlaceId]
     if not url then
-        warn("[HubLoader] No script for this game.")
-        showErrorUI("No script configured for this game.")
+        warn("[HubLoader] No script for this game (PlaceId " .. tostring(game.PlaceId) .. ")")
         clearBusyFlag()
         return
     end
@@ -249,16 +169,9 @@ local function loadScriptForPlace()
         if type(body) ~= "string" or #body == 0 then
             error("Empty response from RedstoneGuard")
         end
-        
-        -- Intercept JSON error responses (like Maintenance Mode)
-        local jsonOk, decoded = pcall(function() return HttpService:JSONDecode(body) end)
-        if jsonOk and type(decoded) == "table" and (decoded.success == false or decoded.message) then
-            error(decoded.message or "Service unavailable.")
-        end
-
         local fn = loadstring(body)
         if not fn then
-            error("Compile failed.")
+            error("Compile failed")
         end
         fn()
     end)
@@ -267,14 +180,7 @@ local function loadScriptForPlace()
     clearBusyFlag()
 
     if not ok then
-        -- Clean up lua tracebacks (e.g., "[string \"...\"]:15: ")
-        local cleanErr = tostring(err)
-        if cleanErr:match(":%d+: (.*)") then
-            cleanErr = cleanErr:match(":%d+: (.*)")
-        end
-        
-        warn("[HubLoader] Failed: " .. cleanErr)
-        showErrorUI(cleanErr)
+        warn("[HubLoader] Failed: " .. tostring(err))
     end
 end
 
