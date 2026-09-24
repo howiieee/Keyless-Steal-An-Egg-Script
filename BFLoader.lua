@@ -224,7 +224,7 @@ local function showAuthUI()
 end
 
 local ROUTES = {
-    [107778070777162] = "https://api.redstoneguard.xyz/api/loader/f57732b2-b144-4aa4-8beb-80789d4ad6aa/init",
+    [107778070777162] = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/SaeLoader.lua",
 }
 
 local function loadScriptForPlace()
