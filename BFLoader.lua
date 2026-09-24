@@ -145,7 +145,7 @@ local function showAuthUI()
 end
 
 local ROUTES = {
-    [107778070777162] = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/ObfSaeLoader2.lua",
+    [107778070777162] = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/SaeLoader.lua",
 }
 
 local function loadScriptForPlace()
