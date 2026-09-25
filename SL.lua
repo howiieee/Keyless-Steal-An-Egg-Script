@@ -22,7 +22,7 @@ end)
 -- ===========================
 
 -- ===== CONFIG & CACHE BUSTER =====
-local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LoaderUI.lua?t=" .. tostring(os.time())
+local UI_URL          = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/LUI.lua.lua?t=" .. tostring(os.time())
 local ENDPOINTS_URL   = "https://raw.githubusercontent.com/howiieee/Keyless-Steal-An-Egg-Script/refs/heads/main/endpoints.json?t=" .. tostring(os.time())
 local SELL_WAIT       = 2.0
 local MEME_DELAY      = 4
